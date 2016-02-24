@@ -2,7 +2,7 @@ package replstore
 
 import (
     "fmt"
-    
+
     "github.com/gholt/store"
 )
 
