@@ -1,0 +1,117 @@
+package replstore
+
+import (
+    "fmt"
+    
+    "github.com/gholt/store"
+)
+
+type repl{{.T}}Store struct {
+    stores []store.{{.T}}Store
+}
+
+type repl{{.T}}StoreErrors struct {
+    errs []*repl{{.T}}StoreError
+}
+
+func (e *repl{{.T}}StoreErrors) Error() string {
+    if len(e.errs) <= 0 {
+        return "unknown error"
+    } else if len(e.errs) == 1 {
+        return e.errs[0].Error()
+    }
+    return fmt.Sprintf("%d errors, first is: %s", len(e.errs), e.errs[0])
+}
+
+type repl{{.T}}StoreError struct {
+    store store.{{.T}}Store
+    err error
+}
+
+func (e *repl{{.T}}StoreError) Error() string {
+    if e.err == nil {
+        return "unknown error"
+    }
+    return e.err.Error()
+}
+
+func NewRepl{{.T}}Store(stores []store.{{.T}}Store) store.{{.T}}Store {
+    return &repl{{.T}}Store{stores: stores}
+}
+
+func (rs *repl{{.T}}Store) helper(f func(s store.{{.T}}Store) error) error {
+    ec := make(chan *repl{{.T}}StoreError)
+    for _, s := range rs.stores {
+        go func(s store.{{.T}}Store) {
+            if err := f(s); err != nil {
+                ec <- &repl{{.T}}StoreError{store: s, err: err}
+            } else {
+                ec <- nil
+            }
+        }(s)
+    }
+    var errs []*repl{{.T}}StoreError
+    for _ = range rs.stores {
+        if err := <-ec; err != nil {
+            errs = append(errs, err)
+        }
+    }
+    if len(errs) > 0 {
+        return &repl{{.T}}StoreErrors{errs: errs}
+    }
+    return nil
+}
+
+func (rs *repl{{.T}}Store) Startup() error {
+    return rs.helper(func(s store.{{.T}}Store) error { return s.Startup() })
+}
+
+func (rs *repl{{.T}}Store) Shutdown() error {
+    return rs.helper(func(s store.{{.T}}Store) error { return s.Shutdown() })
+}
+
+func (rs *repl{{.T}}Store) EnableWrites() error {
+    return rs.helper(func(s store.{{.T}}Store) error { return s.EnableWrites() })
+}
+
+func (rs *repl{{.T}}Store) DisableWrites() error {
+    return rs.helper(func(s store.{{.T}}Store) error { return s.DisableWrites() })
+}
+
+func (rs *repl{{.T}}Store) Flush() error {
+    return rs.helper(func(s store.{{.T}}Store) error { return s.Flush() })
+}
+
+func (rs *repl{{.T}}Store) AuditPass() error {
+    return rs.helper(func(s store.{{.T}}Store) error { return s.AuditPass() })
+}
+
+func (rs *repl{{.T}}Store) Stats(debug bool) (fmt.Stringer, error) {
+    return nil, nil
+}
+
+func (rs *repl{{.T}}Store) ValueCap() (uint32, error) {
+    return 0, nil
+}
+
+func (rs *repl{{.T}}Store) Lookup(keyA, keyB uint64{{if eq .t "group"}}, childKeyA, childKeyB uint64{{end}}) (int64, uint32, error) {
+    return 0, 0, nil
+}
+
+func (rs *repl{{.T}}Store) Read(keyA uint64, keyB uint64{{if eq .t "group"}}, childKeyA, childKeyB uint64{{end}}, value []byte) (int64, []byte, error) {
+    return 0, nil, nil
+}
+
+func (rs *repl{{.T}}Store) Write(keyA uint64, keyB uint64{{if eq .t "group"}}, childKeyA, childKeyB uint64{{end}}, timestampmicro int64, value []byte) (int64, error) {
+    return 0, nil
+}
+
+func (rs *repl{{.T}}Store) Delete(keyA uint64, keyB uint64{{if eq .t "group"}}, childKeyA, childKeyB uint64{{end}}, timestampmicro int64) (int64, error) {
+    return 0, nil
+}
+
+{{if eq .t "group"}}
+func (rs *repl{{.T}}Store) LookupGroup(parentKeyA, parentKeyB uint64) ([]store.LookupGroupItem, error) {
+    return nil, nil
+}
+{{end}}
