@@ -327,3 +327,33 @@ func (rs *ReplGroupStore) LookupGroup(parentKeyA, parentKeyB uint64) ([]store.Lo
 	}
 	return items, errs
 }
+
+func (rs *ReplGroupStore) ReadGroup(parentKeyA, parentKeyB uint64) ([]store.ReadGroupItem, error) {
+	type rettype struct {
+		items []store.ReadGroupItem
+		err   *ReplGroupStoreError
+	}
+	ec := make(chan *rettype)
+	for _, s := range rs.Stores {
+		go func(s store.GroupStore) {
+			items, err := s.ReadGroup(parentKeyA, parentKeyB)
+			ret := &rettype{items: items}
+			if err != nil {
+				ret.err = &ReplGroupStoreError{Store: s, Err: err}
+			}
+			ec <- ret
+		}(s)
+	}
+	var items []store.ReadGroupItem
+	var errs ReplGroupStoreErrorSlice
+	// TODO: Selection algorithms
+	for _ = range rs.Stores {
+		ret := <-ec
+		if ret.err != nil {
+			errs = append(errs, ret.err)
+		} else if len(ret.items) > len(items) {
+			items = ret.items
+		}
+	}
+	return items, errs
+}
