@@ -11,19 +11,13 @@ type ReplValueStore struct {
 	Stores []store.ValueStore
 }
 
-type ReplValueStoreError struct {
-	Store store.ValueStore
-	Err   error
+type ReplValueStoreError interface {
+	error
+	Store() store.ValueStore
+	Err() error
 }
 
-func (e *ReplValueStoreError) Error() string {
-	if e.Err == nil {
-		return "unknown error"
-	}
-	return e.Err.Error()
-}
-
-type ReplValueStoreErrorSlice []*ReplValueStoreError
+type ReplValueStoreErrorSlice []ReplValueStoreError
 
 func (es ReplValueStoreErrorSlice) Error() string {
 	if len(es) <= 0 {
@@ -34,12 +28,47 @@ func (es ReplValueStoreErrorSlice) Error() string {
 	return fmt.Sprintf("%d errors, first is: %s", len(es), es[0])
 }
 
+type ReplValueStoreErrorNotFound ReplValueStoreErrorSlice
+
+func (e ReplValueStoreErrorNotFound) Error() string {
+	if len(e) <= 0 {
+		return "unknown error"
+	} else if len(e) == 1 {
+		return e[0].Error()
+	}
+	return fmt.Sprintf("%d errors, first is: %s", len(e), e[0])
+}
+
+func (e ReplValueStoreErrorNotFound) ErrorNotFound() string {
+	return e.Error()
+}
+
+type replValueStoreError struct {
+	store store.ValueStore
+	err   error
+}
+
+func (e *replValueStoreError) Error() string {
+	if e.err == nil {
+		return "unknown error"
+	}
+	return e.err.Error()
+}
+
+func (e *replValueStoreError) Store() store.ValueStore {
+	return e.store
+}
+
+func (e *replValueStoreError) Err() error {
+	return e.err
+}
+
 func (rs *ReplValueStore) helper(f func(s store.ValueStore) error) error {
-	ec := make(chan *ReplValueStoreError)
+	ec := make(chan ReplValueStoreError)
 	for _, s := range rs.Stores {
 		go func(s store.ValueStore) {
 			if err := f(s); err != nil {
-				ec <- &ReplValueStoreError{Store: s, Err: err}
+				ec <- &replValueStoreError{store: s, err: err}
 			} else {
 				ec <- nil
 			}
@@ -81,19 +110,33 @@ func (rs *ReplValueStore) AuditPass() error {
 	return rs.helper(func(s store.ValueStore) error { return s.AuditPass() })
 }
 
-type ReplValueStoreStats struct {
-	Store store.ValueStore
-	Stats fmt.Stringer
+type ReplValueStoreStats interface {
+	fmt.Stringer
+	Store() store.ValueStore
+	Stats() fmt.Stringer
 }
 
-func (s *ReplValueStoreStats) String() string {
-	if s.Stats == nil {
+type replValueStoreStats struct {
+	store store.ValueStore
+	stats fmt.Stringer
+}
+
+func (s *replValueStoreStats) Store() store.ValueStore {
+	return s.store
+}
+
+func (s *replValueStoreStats) Stats() fmt.Stringer {
+	return s.stats
+}
+
+func (s *replValueStoreStats) String() string {
+	if s.stats == nil {
 		return "nil stats"
 	}
-	return s.Stats.String()
+	return s.stats.String()
 }
 
-type ReplValueStoreStatsSlice []*ReplValueStoreStats
+type ReplValueStoreStatsSlice []ReplValueStoreStats
 
 func (ss ReplValueStoreStatsSlice) String() string {
 	if len(ss) <= 0 {
@@ -106,8 +149,8 @@ func (ss ReplValueStoreStatsSlice) String() string {
 
 func (rs *ReplValueStore) Stats(debug bool) (fmt.Stringer, error) {
 	type rettype struct {
-		stats *ReplValueStoreStats
-		err   *ReplValueStoreError
+		stats ReplValueStoreStats
+		err   ReplValueStoreError
 	}
 	retchan := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -115,10 +158,10 @@ func (rs *ReplValueStore) Stats(debug bool) (fmt.Stringer, error) {
 			stats, err := s.Stats(debug)
 			ret := &rettype{}
 			if stats != nil {
-				ret.stats = &ReplValueStoreStats{Store: s, Stats: stats}
+				ret.stats = &replValueStoreStats{store: s, stats: stats}
 			}
 			if err != nil {
-				ret.err = &ReplValueStoreError{Store: s, Err: err}
+				ret.err = &replValueStoreError{store: s, err: err}
 			}
 			retchan <- ret
 		}(s)
@@ -140,7 +183,7 @@ func (rs *ReplValueStore) Stats(debug bool) (fmt.Stringer, error) {
 func (rs *ReplValueStore) ValueCap() (uint32, error) {
 	type rettype struct {
 		vcap uint32
-		err  *ReplValueStoreError
+		err  ReplValueStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -149,7 +192,7 @@ func (rs *ReplValueStore) ValueCap() (uint32, error) {
 			if err != nil {
 				ec <- &rettype{
 					vcap: vcap,
-					err:  &ReplValueStoreError{Store: s, Err: err},
+					err:  &replValueStoreError{store: s, err: err},
 				}
 			} else {
 				ec <- &rettype{vcap: vcap}
@@ -176,7 +219,7 @@ func (rs *ReplValueStore) Lookup(keyA, keyB uint64) (int64, uint32, error) {
 	type rettype struct {
 		timestampMicro int64
 		length         uint32
-		err            *ReplValueStoreError
+		err            ReplValueStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -184,7 +227,7 @@ func (rs *ReplValueStore) Lookup(keyA, keyB uint64) (int64, uint32, error) {
 			timestampMicro, length, err := s.Lookup(keyA, keyB)
 			ret := &rettype{timestampMicro: timestampMicro, length: length}
 			if err != nil {
-				ret.err = &ReplValueStoreError{Store: s, Err: err}
+				ret.err = &replValueStoreError{store: s, err: err}
 			}
 			ec <- ret
 		}(s)
@@ -192,15 +235,26 @@ func (rs *ReplValueStore) Lookup(keyA, keyB uint64) (int64, uint32, error) {
 	var timestampMicro int64
 	var length uint32
 	var errs ReplValueStoreErrorSlice
+	var notFounds int
 	// TODO: Selection algorithms
 	for _ = range rs.Stores {
 		ret := <-ec
 		if ret.err != nil {
 			errs = append(errs, ret.err)
+			if store.IsNotFound(ret.err) {
+				notFounds++
+			}
 		} else if ret.timestampMicro > timestampMicro {
 			timestampMicro = ret.timestampMicro
 			length = ret.length
 		}
+	}
+	if notFounds > 0 {
+		nferrs := make(ReplValueStoreErrorNotFound, len(errs))
+		for i, v := range errs {
+			nferrs[i] = v
+		}
+		return timestampMicro, length, nferrs
 	}
 	return timestampMicro, length, errs
 }
@@ -209,7 +263,7 @@ func (rs *ReplValueStore) Read(keyA uint64, keyB uint64, value []byte) (int64, [
 	type rettype struct {
 		timestampMicro int64
 		value          []byte
-		err            *ReplValueStoreError
+		err            ReplValueStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -217,7 +271,7 @@ func (rs *ReplValueStore) Read(keyA uint64, keyB uint64, value []byte) (int64, [
 			timestampMicro, value, err := s.Read(keyA, keyB, nil)
 			ret := &rettype{timestampMicro: timestampMicro, value: value}
 			if err != nil {
-				ret.err = &ReplValueStoreError{Store: s, Err: err}
+				ret.err = &replValueStoreError{store: s, err: err}
 			}
 			ec <- ret
 		}(s)
@@ -225,15 +279,26 @@ func (rs *ReplValueStore) Read(keyA uint64, keyB uint64, value []byte) (int64, [
 	var timestampMicro int64
 	var rvalue []byte
 	var errs ReplValueStoreErrorSlice
+	var notFounds int
 	// TODO: Selection algorithms
 	for _ = range rs.Stores {
 		ret := <-ec
 		if ret.err != nil {
 			errs = append(errs, ret.err)
+			if store.IsNotFound(ret.err) {
+				notFounds++
+			}
 		} else if ret.timestampMicro > timestampMicro {
 			timestampMicro = ret.timestampMicro
 			rvalue = ret.value
 		}
+	}
+	if notFounds > 0 {
+		nferrs := make(ReplValueStoreErrorNotFound, len(errs))
+		for i, v := range errs {
+			nferrs[i] = v
+		}
+		return timestampMicro, append(value, rvalue...), nferrs
 	}
 	return timestampMicro, append(value, rvalue...), errs
 }
@@ -241,7 +306,7 @@ func (rs *ReplValueStore) Read(keyA uint64, keyB uint64, value []byte) (int64, [
 func (rs *ReplValueStore) Write(keyA uint64, keyB uint64, timestampMicro int64, value []byte) (int64, error) {
 	type rettype struct {
 		oldTimestampMicro int64
-		err               *ReplValueStoreError
+		err               ReplValueStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -249,7 +314,7 @@ func (rs *ReplValueStore) Write(keyA uint64, keyB uint64, timestampMicro int64, 
 			oldTimestampMicro, err := s.Write(keyA, keyB, timestampMicro, value)
 			ret := &rettype{oldTimestampMicro: oldTimestampMicro}
 			if err != nil {
-				ret.err = &ReplValueStoreError{Store: s, Err: err}
+				ret.err = &replValueStoreError{store: s, err: err}
 			}
 			ec <- ret
 		}(s)
@@ -271,7 +336,7 @@ func (rs *ReplValueStore) Write(keyA uint64, keyB uint64, timestampMicro int64, 
 func (rs *ReplValueStore) Delete(keyA uint64, keyB uint64, timestampMicro int64) (int64, error) {
 	type rettype struct {
 		oldTimestampMicro int64
-		err               *ReplValueStoreError
+		err               ReplValueStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -279,7 +344,7 @@ func (rs *ReplValueStore) Delete(keyA uint64, keyB uint64, timestampMicro int64)
 			oldTimestampMicro, err := s.Delete(keyA, keyB, timestampMicro)
 			ret := &rettype{oldTimestampMicro: oldTimestampMicro}
 			if err != nil {
-				ret.err = &ReplValueStoreError{Store: s, Err: err}
+				ret.err = &replValueStoreError{store: s, err: err}
 			}
 			ec <- ret
 		}(s)

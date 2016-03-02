@@ -11,19 +11,13 @@ type ReplGroupStore struct {
 	Stores []store.GroupStore
 }
 
-type ReplGroupStoreError struct {
-	Store store.GroupStore
-	Err   error
+type ReplGroupStoreError interface {
+	error
+	Store() store.GroupStore
+	Err() error
 }
 
-func (e *ReplGroupStoreError) Error() string {
-	if e.Err == nil {
-		return "unknown error"
-	}
-	return e.Err.Error()
-}
-
-type ReplGroupStoreErrorSlice []*ReplGroupStoreError
+type ReplGroupStoreErrorSlice []ReplGroupStoreError
 
 func (es ReplGroupStoreErrorSlice) Error() string {
 	if len(es) <= 0 {
@@ -34,12 +28,47 @@ func (es ReplGroupStoreErrorSlice) Error() string {
 	return fmt.Sprintf("%d errors, first is: %s", len(es), es[0])
 }
 
+type ReplGroupStoreErrorNotFound ReplGroupStoreErrorSlice
+
+func (e ReplGroupStoreErrorNotFound) Error() string {
+	if len(e) <= 0 {
+		return "unknown error"
+	} else if len(e) == 1 {
+		return e[0].Error()
+	}
+	return fmt.Sprintf("%d errors, first is: %s", len(e), e[0])
+}
+
+func (e ReplGroupStoreErrorNotFound) ErrorNotFound() string {
+	return e.Error()
+}
+
+type replGroupStoreError struct {
+	store store.GroupStore
+	err   error
+}
+
+func (e *replGroupStoreError) Error() string {
+	if e.err == nil {
+		return "unknown error"
+	}
+	return e.err.Error()
+}
+
+func (e *replGroupStoreError) Store() store.GroupStore {
+	return e.store
+}
+
+func (e *replGroupStoreError) Err() error {
+	return e.err
+}
+
 func (rs *ReplGroupStore) helper(f func(s store.GroupStore) error) error {
-	ec := make(chan *ReplGroupStoreError)
+	ec := make(chan ReplGroupStoreError)
 	for _, s := range rs.Stores {
 		go func(s store.GroupStore) {
 			if err := f(s); err != nil {
-				ec <- &ReplGroupStoreError{Store: s, Err: err}
+				ec <- &replGroupStoreError{store: s, err: err}
 			} else {
 				ec <- nil
 			}
@@ -81,19 +110,33 @@ func (rs *ReplGroupStore) AuditPass() error {
 	return rs.helper(func(s store.GroupStore) error { return s.AuditPass() })
 }
 
-type ReplGroupStoreStats struct {
-	Store store.GroupStore
-	Stats fmt.Stringer
+type ReplGroupStoreStats interface {
+	fmt.Stringer
+	Store() store.GroupStore
+	Stats() fmt.Stringer
 }
 
-func (s *ReplGroupStoreStats) String() string {
-	if s.Stats == nil {
+type replGroupStoreStats struct {
+	store store.GroupStore
+	stats fmt.Stringer
+}
+
+func (s *replGroupStoreStats) Store() store.GroupStore {
+	return s.store
+}
+
+func (s *replGroupStoreStats) Stats() fmt.Stringer {
+	return s.stats
+}
+
+func (s *replGroupStoreStats) String() string {
+	if s.stats == nil {
 		return "nil stats"
 	}
-	return s.Stats.String()
+	return s.stats.String()
 }
 
-type ReplGroupStoreStatsSlice []*ReplGroupStoreStats
+type ReplGroupStoreStatsSlice []ReplGroupStoreStats
 
 func (ss ReplGroupStoreStatsSlice) String() string {
 	if len(ss) <= 0 {
@@ -106,8 +149,8 @@ func (ss ReplGroupStoreStatsSlice) String() string {
 
 func (rs *ReplGroupStore) Stats(debug bool) (fmt.Stringer, error) {
 	type rettype struct {
-		stats *ReplGroupStoreStats
-		err   *ReplGroupStoreError
+		stats ReplGroupStoreStats
+		err   ReplGroupStoreError
 	}
 	retchan := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -115,10 +158,10 @@ func (rs *ReplGroupStore) Stats(debug bool) (fmt.Stringer, error) {
 			stats, err := s.Stats(debug)
 			ret := &rettype{}
 			if stats != nil {
-				ret.stats = &ReplGroupStoreStats{Store: s, Stats: stats}
+				ret.stats = &replGroupStoreStats{store: s, stats: stats}
 			}
 			if err != nil {
-				ret.err = &ReplGroupStoreError{Store: s, Err: err}
+				ret.err = &replGroupStoreError{store: s, err: err}
 			}
 			retchan <- ret
 		}(s)
@@ -140,7 +183,7 @@ func (rs *ReplGroupStore) Stats(debug bool) (fmt.Stringer, error) {
 func (rs *ReplGroupStore) ValueCap() (uint32, error) {
 	type rettype struct {
 		vcap uint32
-		err  *ReplGroupStoreError
+		err  ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -149,7 +192,7 @@ func (rs *ReplGroupStore) ValueCap() (uint32, error) {
 			if err != nil {
 				ec <- &rettype{
 					vcap: vcap,
-					err:  &ReplGroupStoreError{Store: s, Err: err},
+					err:  &replGroupStoreError{store: s, err: err},
 				}
 			} else {
 				ec <- &rettype{vcap: vcap}
@@ -176,7 +219,7 @@ func (rs *ReplGroupStore) Lookup(keyA, keyB uint64, childKeyA, childKeyB uint64)
 	type rettype struct {
 		timestampMicro int64
 		length         uint32
-		err            *ReplGroupStoreError
+		err            ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -184,7 +227,7 @@ func (rs *ReplGroupStore) Lookup(keyA, keyB uint64, childKeyA, childKeyB uint64)
 			timestampMicro, length, err := s.Lookup(keyA, keyB, childKeyA, childKeyB)
 			ret := &rettype{timestampMicro: timestampMicro, length: length}
 			if err != nil {
-				ret.err = &ReplGroupStoreError{Store: s, Err: err}
+				ret.err = &replGroupStoreError{store: s, err: err}
 			}
 			ec <- ret
 		}(s)
@@ -192,15 +235,26 @@ func (rs *ReplGroupStore) Lookup(keyA, keyB uint64, childKeyA, childKeyB uint64)
 	var timestampMicro int64
 	var length uint32
 	var errs ReplGroupStoreErrorSlice
+	var notFounds int
 	// TODO: Selection algorithms
 	for _ = range rs.Stores {
 		ret := <-ec
 		if ret.err != nil {
 			errs = append(errs, ret.err)
+			if store.IsNotFound(ret.err) {
+				notFounds++
+			}
 		} else if ret.timestampMicro > timestampMicro {
 			timestampMicro = ret.timestampMicro
 			length = ret.length
 		}
+	}
+	if notFounds > 0 {
+		nferrs := make(ReplGroupStoreErrorNotFound, len(errs))
+		for i, v := range errs {
+			nferrs[i] = v
+		}
+		return timestampMicro, length, nferrs
 	}
 	return timestampMicro, length, errs
 }
@@ -209,7 +263,7 @@ func (rs *ReplGroupStore) Read(keyA uint64, keyB uint64, childKeyA, childKeyB ui
 	type rettype struct {
 		timestampMicro int64
 		value          []byte
-		err            *ReplGroupStoreError
+		err            ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -217,7 +271,7 @@ func (rs *ReplGroupStore) Read(keyA uint64, keyB uint64, childKeyA, childKeyB ui
 			timestampMicro, value, err := s.Read(keyA, keyB, childKeyA, childKeyB, nil)
 			ret := &rettype{timestampMicro: timestampMicro, value: value}
 			if err != nil {
-				ret.err = &ReplGroupStoreError{Store: s, Err: err}
+				ret.err = &replGroupStoreError{store: s, err: err}
 			}
 			ec <- ret
 		}(s)
@@ -225,15 +279,26 @@ func (rs *ReplGroupStore) Read(keyA uint64, keyB uint64, childKeyA, childKeyB ui
 	var timestampMicro int64
 	var rvalue []byte
 	var errs ReplGroupStoreErrorSlice
+	var notFounds int
 	// TODO: Selection algorithms
 	for _ = range rs.Stores {
 		ret := <-ec
 		if ret.err != nil {
 			errs = append(errs, ret.err)
+			if store.IsNotFound(ret.err) {
+				notFounds++
+			}
 		} else if ret.timestampMicro > timestampMicro {
 			timestampMicro = ret.timestampMicro
 			rvalue = ret.value
 		}
+	}
+	if notFounds > 0 {
+		nferrs := make(ReplGroupStoreErrorNotFound, len(errs))
+		for i, v := range errs {
+			nferrs[i] = v
+		}
+		return timestampMicro, append(value, rvalue...), nferrs
 	}
 	return timestampMicro, append(value, rvalue...), errs
 }
@@ -241,7 +306,7 @@ func (rs *ReplGroupStore) Read(keyA uint64, keyB uint64, childKeyA, childKeyB ui
 func (rs *ReplGroupStore) Write(keyA uint64, keyB uint64, childKeyA, childKeyB uint64, timestampMicro int64, value []byte) (int64, error) {
 	type rettype struct {
 		oldTimestampMicro int64
-		err               *ReplGroupStoreError
+		err               ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -249,7 +314,7 @@ func (rs *ReplGroupStore) Write(keyA uint64, keyB uint64, childKeyA, childKeyB u
 			oldTimestampMicro, err := s.Write(keyA, keyB, childKeyA, childKeyB, timestampMicro, value)
 			ret := &rettype{oldTimestampMicro: oldTimestampMicro}
 			if err != nil {
-				ret.err = &ReplGroupStoreError{Store: s, Err: err}
+				ret.err = &replGroupStoreError{store: s, err: err}
 			}
 			ec <- ret
 		}(s)
@@ -271,7 +336,7 @@ func (rs *ReplGroupStore) Write(keyA uint64, keyB uint64, childKeyA, childKeyB u
 func (rs *ReplGroupStore) Delete(keyA uint64, keyB uint64, childKeyA, childKeyB uint64, timestampMicro int64) (int64, error) {
 	type rettype struct {
 		oldTimestampMicro int64
-		err               *ReplGroupStoreError
+		err               ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -279,7 +344,7 @@ func (rs *ReplGroupStore) Delete(keyA uint64, keyB uint64, childKeyA, childKeyB 
 			oldTimestampMicro, err := s.Delete(keyA, keyB, childKeyA, childKeyB, timestampMicro)
 			ret := &rettype{oldTimestampMicro: oldTimestampMicro}
 			if err != nil {
-				ret.err = &ReplGroupStoreError{Store: s, Err: err}
+				ret.err = &replGroupStoreError{store: s, err: err}
 			}
 			ec <- ret
 		}(s)
@@ -301,7 +366,7 @@ func (rs *ReplGroupStore) Delete(keyA uint64, keyB uint64, childKeyA, childKeyB 
 func (rs *ReplGroupStore) LookupGroup(parentKeyA, parentKeyB uint64) ([]store.LookupGroupItem, error) {
 	type rettype struct {
 		items []store.LookupGroupItem
-		err   *ReplGroupStoreError
+		err   ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -309,7 +374,7 @@ func (rs *ReplGroupStore) LookupGroup(parentKeyA, parentKeyB uint64) ([]store.Lo
 			items, err := s.LookupGroup(parentKeyA, parentKeyB)
 			ret := &rettype{items: items}
 			if err != nil {
-				ret.err = &ReplGroupStoreError{Store: s, Err: err}
+				ret.err = &replGroupStoreError{store: s, err: err}
 			}
 			ec <- ret
 		}(s)
@@ -331,7 +396,7 @@ func (rs *ReplGroupStore) LookupGroup(parentKeyA, parentKeyB uint64) ([]store.Lo
 func (rs *ReplGroupStore) ReadGroup(parentKeyA, parentKeyB uint64) ([]store.ReadGroupItem, error) {
 	type rettype struct {
 		items []store.ReadGroupItem
-		err   *ReplGroupStoreError
+		err   ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
 	for _, s := range rs.Stores {
@@ -339,7 +404,7 @@ func (rs *ReplGroupStore) ReadGroup(parentKeyA, parentKeyB uint64) ([]store.Read
 			items, err := s.ReadGroup(parentKeyA, parentKeyB)
 			ret := &rettype{items: items}
 			if err != nil {
-				ret.err = &ReplGroupStoreError{Store: s, Err: err}
+				ret.err = &replGroupStoreError{store: s, err: err}
 			}
 			ec <- ret
 		}(s)
