@@ -1,5 +1,7 @@
 package replstore
 
+import "errors"
+
 // got is at https://github.com/gholt/got
 //go:generate got config.got valueconfig_GEN_.go TT=VALUE T=Value t=value
 //go:generate got config.got groupconfig_GEN_.go TT=GROUP T=Group t=group
@@ -7,6 +9,8 @@ package replstore
 //go:generate got store.got groupstore_GEN_.go TT=GROUP T=Group t=group
 //go:generate got errorstore.got valueerrorstore_GEN_.go TT=VALUE T=Value t=value
 //go:generate got errorstore.got grouperrorstore_GEN_.go TT=GROUP T=Group t=group
+
+var timeoutErr = errors.New("timeout")
 
 type s struct{}
 
