@@ -36,6 +36,8 @@ func (rs *Repl{{.T}}Store) SetRing(r ring.Ring) {
     rs.ringLock.Lock()
     rs.ring = r
     rs.ringLock.Unlock()
+    // TODO: Scan through the rs.stores map and discard no longer referenced
+    // stores.
 }
 
 func (rs *Repl{{.T}}Store) storesFor(keyA uint64) []store.{{.T}}Store {
@@ -66,11 +68,16 @@ func (rs *Repl{{.T}}Store) storesFor(keyA uint64) []store.{{.T}}Store {
                     var err error
                     ss[i], err = api.New{{.T}}Store(as[i], 10)
                     if err != nil {
-                        ss[i] = nil
-                        // TODO: debug log this error
-                    } else {
-                        rs.stores[as[i]] = ss[i]
+                        ss[i] = error{{.T}}Store(fmt.Sprintf("could not create store for %s: %s", as[i], err))
+                        go func(addr string) {
+                            rs.storesLock.Lock()
+                            if _, ok := rs.stores[addr]; ok {
+                                rs.stores[addr] = nil
+                            }
+                            rs.storesLock.Unlock()
+                        }(as[i])
                     }
+                    rs.stores[as[i]] = ss[i]
                 }
             }
         }
@@ -120,9 +127,6 @@ func (rs *Repl{{.T}}Store) Lookup(keyA, keyB uint64{{if eq .t "group"}}, childKe
     ec := make(chan *rettype)
     stores := rs.storesFor(keyA)
     for _, s := range stores {
-        if s == nil {
-            continue
-        }
         go func(s store.{{.T}}Store) {
             timestampMicro, length, err := s.Lookup(keyA, keyB{{if eq .t "group"}}, childKeyA, childKeyB{{end}})
             ret := &rettype{timestampMicro: timestampMicro, length: length}
@@ -137,11 +141,7 @@ func (rs *Repl{{.T}}Store) Lookup(keyA, keyB uint64{{if eq .t "group"}}, childKe
     var errs Repl{{.T}}StoreErrorSlice
     var notFounds int
     // TODO: Selection algorithms
-    for _, s := range stores {
-        if s == nil {
-            errs = append(errs, nil{{.T}}StoreErr)
-            continue
-        }
+    for _ = range stores {
         ret := <-ec
         if ret.err != nil {
             errs = append(errs, ret.err)
@@ -172,9 +172,6 @@ func (rs *Repl{{.T}}Store) Read(keyA uint64, keyB uint64{{if eq .t "group"}}, ch
     ec := make(chan *rettype)
     stores := rs.storesFor(keyA)
     for _, s := range stores {
-        if s == nil {
-            continue
-        }
         go func(s store.{{.T}}Store) {
             timestampMicro, value, err := s.Read(keyA, keyB{{if eq .t "group"}}, childKeyA, childKeyB{{end}}, nil)
             ret := &rettype{timestampMicro: timestampMicro, value: value}
@@ -189,11 +186,7 @@ func (rs *Repl{{.T}}Store) Read(keyA uint64, keyB uint64{{if eq .t "group"}}, ch
     var errs Repl{{.T}}StoreErrorSlice
     var notFounds int
     // TODO: Selection algorithms
-    for _, s := range stores {
-        if s == nil {
-            errs = append(errs, nil{{.T}}StoreErr)
-            continue
-        }
+    for _ = range stores {
         ret := <-ec
         if ret.err != nil {
             errs = append(errs, ret.err)
@@ -223,9 +216,6 @@ func (rs *Repl{{.T}}Store) Write(keyA uint64, keyB uint64{{if eq .t "group"}}, c
     ec := make(chan *rettype)
     stores := rs.storesFor(keyA)
     for _, s := range stores {
-        if s == nil {
-            continue
-        }
         go func(s store.{{.T}}Store) {
             oldTimestampMicro, err := s.Write(keyA, keyB{{if eq .t "group"}}, childKeyA, childKeyB{{end}}, timestampMicro, value)
             ret := &rettype{oldTimestampMicro: oldTimestampMicro}
@@ -238,11 +228,7 @@ func (rs *Repl{{.T}}Store) Write(keyA uint64, keyB uint64{{if eq .t "group"}}, c
     var oldTimestampMicro int64
     var errs Repl{{.T}}StoreErrorSlice
     // TODO: Selection algorithms
-    for _, s := range stores {
-        if s == nil {
-            errs = append(errs, nil{{.T}}StoreErr)
-            continue
-        }
+    for _ = range stores {
         ret := <-ec
         if ret.err != nil {
             errs = append(errs, ret.err)
@@ -261,9 +247,6 @@ func (rs *Repl{{.T}}Store) Delete(keyA uint64, keyB uint64{{if eq .t "group"}}, 
     ec := make(chan *rettype)
     stores := rs.storesFor(keyA)
     for _, s := range stores {
-        if s == nil {
-            continue
-        }
         go func(s store.{{.T}}Store) {
             oldTimestampMicro, err := s.Delete(keyA, keyB{{if eq .t "group"}}, childKeyA, childKeyB{{end}}, timestampMicro)
             ret := &rettype{oldTimestampMicro: oldTimestampMicro}
@@ -276,11 +259,7 @@ func (rs *Repl{{.T}}Store) Delete(keyA uint64, keyB uint64{{if eq .t "group"}}, 
     var oldTimestampMicro int64
     var errs Repl{{.T}}StoreErrorSlice
     // TODO: Selection algorithms
-    for _, s := range stores {
-        if s == nil {
-            errs = append(errs, nil{{.T}}StoreErr)
-            continue
-        }
+    for _ = range stores {
         ret := <-ec
         if ret.err != nil {
             errs = append(errs, ret.err)
@@ -300,9 +279,6 @@ func (rs *Repl{{.T}}Store) LookupGroup(parentKeyA, parentKeyB uint64) ([]store.L
     ec := make(chan *rettype)
     stores := rs.storesFor(parentKeyA)
     for _, s := range stores {
-        if s == nil {
-            continue
-        }
         go func(s store.{{.T}}Store) {
             items, err := s.LookupGroup(parentKeyA, parentKeyB)
             ret := &rettype{items: items}
@@ -315,11 +291,7 @@ func (rs *Repl{{.T}}Store) LookupGroup(parentKeyA, parentKeyB uint64) ([]store.L
     var items []store.LookupGroupItem
     var errs Repl{{.T}}StoreErrorSlice
     // TODO: Selection algorithms
-    for _, s := range stores {
-        if s == nil {
-            errs = append(errs, nil{{.T}}StoreErr)
-            continue
-        }
+    for _ = range stores {
         ret := <-ec
         if ret.err != nil {
             errs = append(errs, ret.err)
@@ -338,9 +310,6 @@ func (rs *Repl{{.T}}Store) ReadGroup(parentKeyA, parentKeyB uint64) ([]store.Rea
     ec := make(chan *rettype)
     stores := rs.storesFor(parentKeyA)
     for _, s := range stores {
-        if s == nil {
-            continue
-        }
         go func(s store.{{.T}}Store) {
             items, err := s.ReadGroup(parentKeyA, parentKeyB)
             ret := &rettype{items: items}
@@ -353,11 +322,7 @@ func (rs *Repl{{.T}}Store) ReadGroup(parentKeyA, parentKeyB uint64) ([]store.Rea
     var items []store.ReadGroupItem
     var errs Repl{{.T}}StoreErrorSlice
     // TODO: Selection algorithms
-    for _, s := range stores {
-        if s == nil {
-            errs = append(errs, nil{{.T}}StoreErr)
-            continue
-        }
+    for _ = range stores {
         ret := <-ec
         if ret.err != nil {
             errs = append(errs, ret.err)
@@ -420,5 +385,3 @@ func (e *repl{{.T}}StoreError) Store() store.{{.T}}Store {
 func (e *repl{{.T}}StoreError) Err() error {
     return e.err
 }
-
-var nil{{.T}}StoreErr = &repl{{.T}}StoreError{err: errors.New("nil store")}

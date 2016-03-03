@@ -36,6 +36,8 @@ func (rs *ReplValueStore) SetRing(r ring.Ring) {
 	rs.ringLock.Lock()
 	rs.ring = r
 	rs.ringLock.Unlock()
+	// TODO: Scan through the rs.stores map and discard no longer referenced
+	// stores.
 }
 
 func (rs *ReplValueStore) storesFor(keyA uint64) []store.ValueStore {
@@ -66,11 +68,16 @@ func (rs *ReplValueStore) storesFor(keyA uint64) []store.ValueStore {
 					var err error
 					ss[i], err = api.NewValueStore(as[i], 10)
 					if err != nil {
-						ss[i] = nil
-						// TODO: debug log this error
-					} else {
-						rs.stores[as[i]] = ss[i]
+						ss[i] = errorValueStore(fmt.Sprintf("could not create store for %s: %s", as[i], err))
+						go func(addr string) {
+							rs.storesLock.Lock()
+							if _, ok := rs.stores[addr]; ok {
+								rs.stores[addr] = nil
+							}
+							rs.storesLock.Unlock()
+						}(as[i])
 					}
+					rs.stores[as[i]] = ss[i]
 				}
 			}
 		}
@@ -120,9 +127,6 @@ func (rs *ReplValueStore) Lookup(keyA, keyB uint64) (int64, uint32, error) {
 	ec := make(chan *rettype)
 	stores := rs.storesFor(keyA)
 	for _, s := range stores {
-		if s == nil {
-			continue
-		}
 		go func(s store.ValueStore) {
 			timestampMicro, length, err := s.Lookup(keyA, keyB)
 			ret := &rettype{timestampMicro: timestampMicro, length: length}
@@ -137,11 +141,7 @@ func (rs *ReplValueStore) Lookup(keyA, keyB uint64) (int64, uint32, error) {
 	var errs ReplValueStoreErrorSlice
 	var notFounds int
 	// TODO: Selection algorithms
-	for _, s := range stores {
-		if s == nil {
-			errs = append(errs, nilValueStoreErr)
-			continue
-		}
+	for _ = range stores {
 		ret := <-ec
 		if ret.err != nil {
 			errs = append(errs, ret.err)
@@ -172,9 +172,6 @@ func (rs *ReplValueStore) Read(keyA uint64, keyB uint64, value []byte) (int64, [
 	ec := make(chan *rettype)
 	stores := rs.storesFor(keyA)
 	for _, s := range stores {
-		if s == nil {
-			continue
-		}
 		go func(s store.ValueStore) {
 			timestampMicro, value, err := s.Read(keyA, keyB, nil)
 			ret := &rettype{timestampMicro: timestampMicro, value: value}
@@ -189,11 +186,7 @@ func (rs *ReplValueStore) Read(keyA uint64, keyB uint64, value []byte) (int64, [
 	var errs ReplValueStoreErrorSlice
 	var notFounds int
 	// TODO: Selection algorithms
-	for _, s := range stores {
-		if s == nil {
-			errs = append(errs, nilValueStoreErr)
-			continue
-		}
+	for _ = range stores {
 		ret := <-ec
 		if ret.err != nil {
 			errs = append(errs, ret.err)
@@ -223,9 +216,6 @@ func (rs *ReplValueStore) Write(keyA uint64, keyB uint64, timestampMicro int64, 
 	ec := make(chan *rettype)
 	stores := rs.storesFor(keyA)
 	for _, s := range stores {
-		if s == nil {
-			continue
-		}
 		go func(s store.ValueStore) {
 			oldTimestampMicro, err := s.Write(keyA, keyB, timestampMicro, value)
 			ret := &rettype{oldTimestampMicro: oldTimestampMicro}
@@ -238,11 +228,7 @@ func (rs *ReplValueStore) Write(keyA uint64, keyB uint64, timestampMicro int64, 
 	var oldTimestampMicro int64
 	var errs ReplValueStoreErrorSlice
 	// TODO: Selection algorithms
-	for _, s := range stores {
-		if s == nil {
-			errs = append(errs, nilValueStoreErr)
-			continue
-		}
+	for _ = range stores {
 		ret := <-ec
 		if ret.err != nil {
 			errs = append(errs, ret.err)
@@ -261,9 +247,6 @@ func (rs *ReplValueStore) Delete(keyA uint64, keyB uint64, timestampMicro int64)
 	ec := make(chan *rettype)
 	stores := rs.storesFor(keyA)
 	for _, s := range stores {
-		if s == nil {
-			continue
-		}
 		go func(s store.ValueStore) {
 			oldTimestampMicro, err := s.Delete(keyA, keyB, timestampMicro)
 			ret := &rettype{oldTimestampMicro: oldTimestampMicro}
@@ -276,11 +259,7 @@ func (rs *ReplValueStore) Delete(keyA uint64, keyB uint64, timestampMicro int64)
 	var oldTimestampMicro int64
 	var errs ReplValueStoreErrorSlice
 	// TODO: Selection algorithms
-	for _, s := range stores {
-		if s == nil {
-			errs = append(errs, nilValueStoreErr)
-			continue
-		}
+	for _ = range stores {
 		ret := <-ec
 		if ret.err != nil {
 			errs = append(errs, ret.err)
@@ -342,5 +321,3 @@ func (e *replValueStoreError) Store() store.ValueStore {
 func (e *replValueStoreError) Err() error {
 	return e.err
 }
-
-var nilValueStoreErr = &replValueStoreError{err: errors.New("nil store")}
