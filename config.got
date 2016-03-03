@@ -1,0 +1,17 @@
+package replstore
+
+// Repl{{.T}}StoreConfig defines the settings when calling New{{.T}}Store.
+type Repl{{.T}}StoreConfig struct {
+    // AddressIndex indicates which of the ring node addresses to use when
+    // connecting to a node (see github.com/gholt/ring/Node.Address).
+    AddressIndex int
+}
+
+func resolveRepl{{.T}}StoreConfig(c *Repl{{.T}}StoreConfig) *Repl{{.T}}StoreConfig {
+    cfg := &Repl{{.T}}StoreConfig{}
+    if c != nil {
+        *cfg = *c
+    }
+    // AddressIndex default of 0 is fine.
+    return cfg
+}

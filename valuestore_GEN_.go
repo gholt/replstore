@@ -1,14 +1,294 @@
 package replstore
 
 import (
+	"errors"
 	"fmt"
-	"math"
+	"sync"
 
+	"github.com/gholt/ring"
 	"github.com/gholt/store"
+	"github.com/pandemicsyn/oort/api"
 )
 
 type ReplValueStore struct {
-	Stores []store.ValueStore
+	addressIndex int
+
+	ringLock sync.RWMutex
+	ring     ring.Ring
+
+	storesLock sync.RWMutex
+	stores     map[string]store.ValueStore
+}
+
+func NewReplValueStore(c *ReplValueStoreConfig) *ReplValueStore {
+	cfg := resolveReplValueStoreConfig(c)
+	return &ReplValueStore{addressIndex: cfg.AddressIndex}
+}
+
+func (rs *ReplValueStore) Ring() ring.Ring {
+	rs.ringLock.RLock()
+	r := rs.ring
+	rs.ringLock.RUnlock()
+	return r
+}
+
+func (rs *ReplValueStore) SetRing(r ring.Ring) {
+	rs.ringLock.Lock()
+	rs.ring = r
+	rs.ringLock.Unlock()
+}
+
+func (rs *ReplValueStore) storesFor(keyA uint64) []store.ValueStore {
+	rs.ringLock.RLock()
+	r := rs.ring
+	rs.ringLock.RUnlock()
+	ns := r.ResponsibleNodes(uint32(keyA >> (64 - r.PartitionBitCount())))
+	as := make([]string, len(ns))
+	for i, n := range ns {
+		as[i] = n.Address(rs.addressIndex)
+	}
+	ss := make([]store.ValueStore, len(ns))
+	var someNil bool
+	rs.storesLock.RLock()
+	for i := len(ss) - 1; i >= 0; i-- {
+		ss[i] = rs.stores[as[i]]
+		if ss[i] == nil {
+			someNil = true
+		}
+	}
+	rs.storesLock.RUnlock()
+	if someNil {
+		rs.storesLock.Lock()
+		for i := len(ss) - 1; i >= 0; i-- {
+			if ss[i] == nil {
+				ss[i] = rs.stores[as[i]]
+				if ss[i] == nil {
+					var err error
+					ss[i], err = api.NewValueStore(as[i], 10)
+					if err != nil {
+						ss[i] = nil
+						// TODO: debug log this error
+					} else {
+						rs.stores[as[i]] = ss[i]
+					}
+				}
+			}
+		}
+		rs.storesLock.Unlock()
+	}
+	return ss
+}
+
+func (rs *ReplValueStore) Startup() error {
+	return nil
+}
+
+func (rs *ReplValueStore) Shutdown() error {
+	return nil
+}
+
+func (rs *ReplValueStore) EnableWrites() error {
+	return nil
+}
+
+func (rs *ReplValueStore) DisableWrites() error {
+	return errors.New("cannot disable writes with this client at this time")
+}
+
+func (rs *ReplValueStore) Flush() error {
+	return nil
+}
+
+func (rs *ReplValueStore) AuditPass() error {
+	return errors.New("audit passes not available with this client at this time")
+}
+
+func (rs *ReplValueStore) Stats(debug bool) (fmt.Stringer, error) {
+	return noStats, nil
+}
+
+func (rs *ReplValueStore) ValueCap() (uint32, error) {
+	return 0xffffffff, nil
+}
+
+func (rs *ReplValueStore) Lookup(keyA, keyB uint64) (int64, uint32, error) {
+	type rettype struct {
+		timestampMicro int64
+		length         uint32
+		err            ReplValueStoreError
+	}
+	ec := make(chan *rettype)
+	stores := rs.storesFor(keyA)
+	for _, s := range stores {
+		if s == nil {
+			continue
+		}
+		go func(s store.ValueStore) {
+			timestampMicro, length, err := s.Lookup(keyA, keyB)
+			ret := &rettype{timestampMicro: timestampMicro, length: length}
+			if err != nil {
+				ret.err = &replValueStoreError{store: s, err: err}
+			}
+			ec <- ret
+		}(s)
+	}
+	var timestampMicro int64
+	var length uint32
+	var errs ReplValueStoreErrorSlice
+	var notFounds int
+	// TODO: Selection algorithms
+	for _, s := range stores {
+		if s == nil {
+			errs = append(errs, nilValueStoreErr)
+			continue
+		}
+		ret := <-ec
+		if ret.err != nil {
+			errs = append(errs, ret.err)
+			if store.IsNotFound(ret.err) {
+				notFounds++
+			}
+		} else if ret.timestampMicro > timestampMicro {
+			timestampMicro = ret.timestampMicro
+			length = ret.length
+		}
+	}
+	if notFounds > 0 {
+		nferrs := make(ReplValueStoreErrorNotFound, len(errs))
+		for i, v := range errs {
+			nferrs[i] = v
+		}
+		return timestampMicro, length, nferrs
+	}
+	return timestampMicro, length, errs
+}
+
+func (rs *ReplValueStore) Read(keyA uint64, keyB uint64, value []byte) (int64, []byte, error) {
+	type rettype struct {
+		timestampMicro int64
+		value          []byte
+		err            ReplValueStoreError
+	}
+	ec := make(chan *rettype)
+	stores := rs.storesFor(keyA)
+	for _, s := range stores {
+		if s == nil {
+			continue
+		}
+		go func(s store.ValueStore) {
+			timestampMicro, value, err := s.Read(keyA, keyB, nil)
+			ret := &rettype{timestampMicro: timestampMicro, value: value}
+			if err != nil {
+				ret.err = &replValueStoreError{store: s, err: err}
+			}
+			ec <- ret
+		}(s)
+	}
+	var timestampMicro int64
+	var rvalue []byte
+	var errs ReplValueStoreErrorSlice
+	var notFounds int
+	// TODO: Selection algorithms
+	for _, s := range stores {
+		if s == nil {
+			errs = append(errs, nilValueStoreErr)
+			continue
+		}
+		ret := <-ec
+		if ret.err != nil {
+			errs = append(errs, ret.err)
+			if store.IsNotFound(ret.err) {
+				notFounds++
+			}
+		} else if ret.timestampMicro > timestampMicro {
+			timestampMicro = ret.timestampMicro
+			rvalue = ret.value
+		}
+	}
+	if notFounds > 0 {
+		nferrs := make(ReplValueStoreErrorNotFound, len(errs))
+		for i, v := range errs {
+			nferrs[i] = v
+		}
+		return timestampMicro, append(value, rvalue...), nferrs
+	}
+	return timestampMicro, append(value, rvalue...), errs
+}
+
+func (rs *ReplValueStore) Write(keyA uint64, keyB uint64, timestampMicro int64, value []byte) (int64, error) {
+	type rettype struct {
+		oldTimestampMicro int64
+		err               ReplValueStoreError
+	}
+	ec := make(chan *rettype)
+	stores := rs.storesFor(keyA)
+	for _, s := range stores {
+		if s == nil {
+			continue
+		}
+		go func(s store.ValueStore) {
+			oldTimestampMicro, err := s.Write(keyA, keyB, timestampMicro, value)
+			ret := &rettype{oldTimestampMicro: oldTimestampMicro}
+			if err != nil {
+				ret.err = &replValueStoreError{store: s, err: err}
+			}
+			ec <- ret
+		}(s)
+	}
+	var oldTimestampMicro int64
+	var errs ReplValueStoreErrorSlice
+	// TODO: Selection algorithms
+	for _, s := range stores {
+		if s == nil {
+			errs = append(errs, nilValueStoreErr)
+			continue
+		}
+		ret := <-ec
+		if ret.err != nil {
+			errs = append(errs, ret.err)
+		} else if ret.oldTimestampMicro > oldTimestampMicro {
+			oldTimestampMicro = ret.oldTimestampMicro
+		}
+	}
+	return oldTimestampMicro, errs
+}
+
+func (rs *ReplValueStore) Delete(keyA uint64, keyB uint64, timestampMicro int64) (int64, error) {
+	type rettype struct {
+		oldTimestampMicro int64
+		err               ReplValueStoreError
+	}
+	ec := make(chan *rettype)
+	stores := rs.storesFor(keyA)
+	for _, s := range stores {
+		if s == nil {
+			continue
+		}
+		go func(s store.ValueStore) {
+			oldTimestampMicro, err := s.Delete(keyA, keyB, timestampMicro)
+			ret := &rettype{oldTimestampMicro: oldTimestampMicro}
+			if err != nil {
+				ret.err = &replValueStoreError{store: s, err: err}
+			}
+			ec <- ret
+		}(s)
+	}
+	var oldTimestampMicro int64
+	var errs ReplValueStoreErrorSlice
+	// TODO: Selection algorithms
+	for _, s := range stores {
+		if s == nil {
+			errs = append(errs, nilValueStoreErr)
+			continue
+		}
+		ret := <-ec
+		if ret.err != nil {
+			errs = append(errs, ret.err)
+		} else if ret.oldTimestampMicro > oldTimestampMicro {
+			oldTimestampMicro = ret.oldTimestampMicro
+		}
+	}
+	return oldTimestampMicro, errs
 }
 
 type ReplValueStoreError interface {
@@ -63,302 +343,4 @@ func (e *replValueStoreError) Err() error {
 	return e.err
 }
 
-func (rs *ReplValueStore) helper(f func(s store.ValueStore) error) error {
-	ec := make(chan ReplValueStoreError)
-	for _, s := range rs.Stores {
-		go func(s store.ValueStore) {
-			if err := f(s); err != nil {
-				ec <- &replValueStoreError{store: s, err: err}
-			} else {
-				ec <- nil
-			}
-		}(s)
-	}
-	var errs ReplValueStoreErrorSlice
-	for _ = range rs.Stores {
-		if err := <-ec; err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if len(errs) > 0 {
-		return errs
-	}
-	return nil
-}
-
-func (rs *ReplValueStore) Startup() error {
-	return rs.helper(func(s store.ValueStore) error { return s.Startup() })
-}
-
-func (rs *ReplValueStore) Shutdown() error {
-	return rs.helper(func(s store.ValueStore) error { return s.Shutdown() })
-}
-
-func (rs *ReplValueStore) EnableWrites() error {
-	return rs.helper(func(s store.ValueStore) error { return s.EnableWrites() })
-}
-
-func (rs *ReplValueStore) DisableWrites() error {
-	return rs.helper(func(s store.ValueStore) error { return s.DisableWrites() })
-}
-
-func (rs *ReplValueStore) Flush() error {
-	return rs.helper(func(s store.ValueStore) error { return s.Flush() })
-}
-
-func (rs *ReplValueStore) AuditPass() error {
-	return rs.helper(func(s store.ValueStore) error { return s.AuditPass() })
-}
-
-type ReplValueStoreStats interface {
-	fmt.Stringer
-	Store() store.ValueStore
-	Stats() fmt.Stringer
-}
-
-type replValueStoreStats struct {
-	store store.ValueStore
-	stats fmt.Stringer
-}
-
-func (s *replValueStoreStats) Store() store.ValueStore {
-	return s.store
-}
-
-func (s *replValueStoreStats) Stats() fmt.Stringer {
-	return s.stats
-}
-
-func (s *replValueStoreStats) String() string {
-	if s.stats == nil {
-		return "nil stats"
-	}
-	return s.stats.String()
-}
-
-type ReplValueStoreStatsSlice []ReplValueStoreStats
-
-func (ss ReplValueStoreStatsSlice) String() string {
-	if len(ss) <= 0 {
-		return "nil stats"
-	} else if len(ss) == 1 {
-		return ss[0].String()
-	}
-	return fmt.Sprintf("%d stats, first is: %s", len(ss), ss[0])
-}
-
-func (rs *ReplValueStore) Stats(debug bool) (fmt.Stringer, error) {
-	type rettype struct {
-		stats ReplValueStoreStats
-		err   ReplValueStoreError
-	}
-	retchan := make(chan *rettype)
-	for _, s := range rs.Stores {
-		go func(s store.ValueStore) {
-			stats, err := s.Stats(debug)
-			ret := &rettype{}
-			if stats != nil {
-				ret.stats = &replValueStoreStats{store: s, stats: stats}
-			}
-			if err != nil {
-				ret.err = &replValueStoreError{store: s, err: err}
-			}
-			retchan <- ret
-		}(s)
-	}
-	var stats ReplValueStoreStatsSlice
-	var errs ReplValueStoreErrorSlice
-	for _ = range rs.Stores {
-		ret := <-retchan
-		if ret.stats != nil {
-			stats = append(stats, ret.stats)
-		}
-		if ret.err != nil {
-			errs = append(errs, ret.err)
-		}
-	}
-	return stats, errs
-}
-
-func (rs *ReplValueStore) ValueCap() (uint32, error) {
-	type rettype struct {
-		vcap uint32
-		err  ReplValueStoreError
-	}
-	ec := make(chan *rettype)
-	for _, s := range rs.Stores {
-		go func(s store.ValueStore) {
-			vcap, err := s.ValueCap()
-			if err != nil {
-				ec <- &rettype{
-					vcap: vcap,
-					err:  &replValueStoreError{store: s, err: err},
-				}
-			} else {
-				ec <- &rettype{vcap: vcap}
-			}
-		}(s)
-	}
-	vcap := uint32(math.MaxUint32)
-	var errs ReplValueStoreErrorSlice
-	for _ = range rs.Stores {
-		ret := <-ec
-		if ret.err != nil {
-			errs = append(errs, ret.err)
-		} else if ret.vcap < vcap {
-			vcap = ret.vcap
-		}
-	}
-	if len(errs) > 0 {
-		return 0, errs
-	}
-	return vcap, nil
-}
-
-func (rs *ReplValueStore) Lookup(keyA, keyB uint64) (int64, uint32, error) {
-	type rettype struct {
-		timestampMicro int64
-		length         uint32
-		err            ReplValueStoreError
-	}
-	ec := make(chan *rettype)
-	for _, s := range rs.Stores {
-		go func(s store.ValueStore) {
-			timestampMicro, length, err := s.Lookup(keyA, keyB)
-			ret := &rettype{timestampMicro: timestampMicro, length: length}
-			if err != nil {
-				ret.err = &replValueStoreError{store: s, err: err}
-			}
-			ec <- ret
-		}(s)
-	}
-	var timestampMicro int64
-	var length uint32
-	var errs ReplValueStoreErrorSlice
-	var notFounds int
-	// TODO: Selection algorithms
-	for _ = range rs.Stores {
-		ret := <-ec
-		if ret.err != nil {
-			errs = append(errs, ret.err)
-			if store.IsNotFound(ret.err) {
-				notFounds++
-			}
-		} else if ret.timestampMicro > timestampMicro {
-			timestampMicro = ret.timestampMicro
-			length = ret.length
-		}
-	}
-	if notFounds > 0 {
-		nferrs := make(ReplValueStoreErrorNotFound, len(errs))
-		for i, v := range errs {
-			nferrs[i] = v
-		}
-		return timestampMicro, length, nferrs
-	}
-	return timestampMicro, length, errs
-}
-
-func (rs *ReplValueStore) Read(keyA uint64, keyB uint64, value []byte) (int64, []byte, error) {
-	type rettype struct {
-		timestampMicro int64
-		value          []byte
-		err            ReplValueStoreError
-	}
-	ec := make(chan *rettype)
-	for _, s := range rs.Stores {
-		go func(s store.ValueStore) {
-			timestampMicro, value, err := s.Read(keyA, keyB, nil)
-			ret := &rettype{timestampMicro: timestampMicro, value: value}
-			if err != nil {
-				ret.err = &replValueStoreError{store: s, err: err}
-			}
-			ec <- ret
-		}(s)
-	}
-	var timestampMicro int64
-	var rvalue []byte
-	var errs ReplValueStoreErrorSlice
-	var notFounds int
-	// TODO: Selection algorithms
-	for _ = range rs.Stores {
-		ret := <-ec
-		if ret.err != nil {
-			errs = append(errs, ret.err)
-			if store.IsNotFound(ret.err) {
-				notFounds++
-			}
-		} else if ret.timestampMicro > timestampMicro {
-			timestampMicro = ret.timestampMicro
-			rvalue = ret.value
-		}
-	}
-	if notFounds > 0 {
-		nferrs := make(ReplValueStoreErrorNotFound, len(errs))
-		for i, v := range errs {
-			nferrs[i] = v
-		}
-		return timestampMicro, append(value, rvalue...), nferrs
-	}
-	return timestampMicro, append(value, rvalue...), errs
-}
-
-func (rs *ReplValueStore) Write(keyA uint64, keyB uint64, timestampMicro int64, value []byte) (int64, error) {
-	type rettype struct {
-		oldTimestampMicro int64
-		err               ReplValueStoreError
-	}
-	ec := make(chan *rettype)
-	for _, s := range rs.Stores {
-		go func(s store.ValueStore) {
-			oldTimestampMicro, err := s.Write(keyA, keyB, timestampMicro, value)
-			ret := &rettype{oldTimestampMicro: oldTimestampMicro}
-			if err != nil {
-				ret.err = &replValueStoreError{store: s, err: err}
-			}
-			ec <- ret
-		}(s)
-	}
-	var oldTimestampMicro int64
-	var errs ReplValueStoreErrorSlice
-	// TODO: Selection algorithms
-	for _ = range rs.Stores {
-		ret := <-ec
-		if ret.err != nil {
-			errs = append(errs, ret.err)
-		} else if ret.oldTimestampMicro > oldTimestampMicro {
-			oldTimestampMicro = ret.oldTimestampMicro
-		}
-	}
-	return oldTimestampMicro, errs
-}
-
-func (rs *ReplValueStore) Delete(keyA uint64, keyB uint64, timestampMicro int64) (int64, error) {
-	type rettype struct {
-		oldTimestampMicro int64
-		err               ReplValueStoreError
-	}
-	ec := make(chan *rettype)
-	for _, s := range rs.Stores {
-		go func(s store.ValueStore) {
-			oldTimestampMicro, err := s.Delete(keyA, keyB, timestampMicro)
-			ret := &rettype{oldTimestampMicro: oldTimestampMicro}
-			if err != nil {
-				ret.err = &replValueStoreError{store: s, err: err}
-			}
-			ec <- ret
-		}(s)
-	}
-	var oldTimestampMicro int64
-	var errs ReplValueStoreErrorSlice
-	// TODO: Selection algorithms
-	for _ = range rs.Stores {
-		ret := <-ec
-		if ret.err != nil {
-			errs = append(errs, ret.err)
-		} else if ret.oldTimestampMicro > oldTimestampMicro {
-			oldTimestampMicro = ret.oldTimestampMicro
-		}
-	}
-	return oldTimestampMicro, errs
-}
+var nilValueStoreErr = &replValueStoreError{err: errors.New("nil store")}
