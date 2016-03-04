@@ -9,6 +9,7 @@ import (
 	"github.com/gholt/ring"
 	"github.com/gholt/store"
 	"github.com/pandemicsyn/oort/api"
+	"golang.org/x/net/context"
 )
 
 type ReplValueStore struct {
@@ -64,14 +65,15 @@ func (rs *ReplValueStore) SetRing(r ring.Ring) {
 		}
 		rs.storesLock.Unlock()
 		for _, s := range shutdownStores {
-			if err := s.store.Shutdown(); err != nil {
+			if err := s.store.Shutdown(context.Background()); err != nil {
 				// TODO: debug log the err for completeness
 			}
 		}
 	}
 }
 
-func (rs *ReplValueStore) storesFor(keyA uint64) []*replValueStoreAndTicketChan {
+func (rs *ReplValueStore) storesFor(ctx context.Context, keyA uint64) []*replValueStoreAndTicketChan {
+	// TODO: Pay attention to ctx.
 	rs.ringLock.RLock()
 	r := rs.ring
 	rs.ringLock.RUnlock()
@@ -105,7 +107,7 @@ func (rs *ReplValueStore) storesFor(keyA uint64) []*replValueStoreAndTicketChan 
 					ss[i] = &replValueStoreAndTicketChan{ticketChan: tc}
 					// TODO: The 10 here is arbitrary (and unrelated to the
 					// above arbitrary 10).
-					ss[i].store, err = api.NewValueStore(as[i], 10)
+					ss[i].store, err = api.NewValueStore(ctx, as[i], 10)
 					if err != nil {
 						ss[i].store = errorValueStore(fmt.Sprintf("could not create store for %s: %s", as[i], err))
 						go func(addr string) {
@@ -160,21 +162,22 @@ func (rs *ReplValueStore) ValueCap() (uint32, error) {
 	return 0xffffffff, nil
 }
 
-func (rs *ReplValueStore) Lookup(keyA, keyB uint64) (int64, uint32, error) {
+func (rs *ReplValueStore) Lookup(ctx context.Context, keyA, keyB uint64) (int64, uint32, error) {
+	// TODO: Pay attention to ctx.
 	type rettype struct {
 		timestampMicro int64
 		length         uint32
 		err            ReplValueStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(keyA)
+	stores := rs.storesFor(ctx, keyA)
 	for _, s := range stores {
 		go func(s *replValueStoreAndTicketChan) {
 			ret := &rettype{}
 			var err error
 			select {
 			case <-s.ticketChan:
-				ret.timestampMicro, ret.length, err = s.store.Lookup(keyA, keyB)
+				ret.timestampMicro, ret.length, err = s.store.Lookup(ctx, keyA, keyB)
 				s.ticketChan <- struct{}{}
 			case <-time.After(time.Second):
 				// TODO: That time.Second above is arbitrary.
@@ -213,21 +216,22 @@ func (rs *ReplValueStore) Lookup(keyA, keyB uint64) (int64, uint32, error) {
 	return timestampMicro, length, errs
 }
 
-func (rs *ReplValueStore) Read(keyA uint64, keyB uint64, value []byte) (int64, []byte, error) {
+func (rs *ReplValueStore) Read(ctx context.Context, keyA uint64, keyB uint64, value []byte) (int64, []byte, error) {
+	// TODO: Pay attention to ctx.
 	type rettype struct {
 		timestampMicro int64
 		value          []byte
 		err            ReplValueStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(keyA)
+	stores := rs.storesFor(ctx, keyA)
 	for _, s := range stores {
 		go func(s *replValueStoreAndTicketChan) {
 			ret := &rettype{}
 			var err error
 			select {
 			case <-s.ticketChan:
-				ret.timestampMicro, ret.value, err = s.store.Read(keyA, keyB, nil)
+				ret.timestampMicro, ret.value, err = s.store.Read(ctx, keyA, keyB, nil)
 				s.ticketChan <- struct{}{}
 			case <-time.After(time.Second):
 				// TODO: That time.Second above is arbitrary.
@@ -269,20 +273,21 @@ func (rs *ReplValueStore) Read(keyA uint64, keyB uint64, value []byte) (int64, [
 	return timestampMicro, rvalue, errs
 }
 
-func (rs *ReplValueStore) Write(keyA uint64, keyB uint64, timestampMicro int64, value []byte) (int64, error) {
+func (rs *ReplValueStore) Write(ctx context.Context, keyA uint64, keyB uint64, timestampMicro int64, value []byte) (int64, error) {
+	// TODO: Pay attention to ctx.
 	type rettype struct {
 		oldTimestampMicro int64
 		err               ReplValueStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(keyA)
+	stores := rs.storesFor(ctx, keyA)
 	for _, s := range stores {
 		go func(s *replValueStoreAndTicketChan) {
 			ret := &rettype{}
 			var err error
 			select {
 			case <-s.ticketChan:
-				ret.oldTimestampMicro, err = s.store.Write(keyA, keyB, timestampMicro, value)
+				ret.oldTimestampMicro, err = s.store.Write(ctx, keyA, keyB, timestampMicro, value)
 				s.ticketChan <- struct{}{}
 			case <-time.After(time.Second):
 				// TODO: That time.Second above is arbitrary.
@@ -308,20 +313,21 @@ func (rs *ReplValueStore) Write(keyA uint64, keyB uint64, timestampMicro int64, 
 	return oldTimestampMicro, errs
 }
 
-func (rs *ReplValueStore) Delete(keyA uint64, keyB uint64, timestampMicro int64) (int64, error) {
+func (rs *ReplValueStore) Delete(ctx context.Context, keyA uint64, keyB uint64, timestampMicro int64) (int64, error) {
+	// TODO: Pay attention to ctx.
 	type rettype struct {
 		oldTimestampMicro int64
 		err               ReplValueStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(keyA)
+	stores := rs.storesFor(ctx, keyA)
 	for _, s := range stores {
 		go func(s *replValueStoreAndTicketChan) {
 			ret := &rettype{}
 			var err error
 			select {
 			case <-s.ticketChan:
-				ret.oldTimestampMicro, err = s.store.Delete(keyA, keyB, timestampMicro)
+				ret.oldTimestampMicro, err = s.store.Delete(ctx, keyA, keyB, timestampMicro)
 				s.ticketChan <- struct{}{}
 			case <-time.After(time.Second):
 				// TODO: That time.Second above is arbitrary.

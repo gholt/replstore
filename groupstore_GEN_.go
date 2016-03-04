@@ -9,6 +9,7 @@ import (
 	"github.com/gholt/ring"
 	"github.com/gholt/store"
 	"github.com/pandemicsyn/oort/api"
+	"golang.org/x/net/context"
 )
 
 type ReplGroupStore struct {
@@ -64,14 +65,15 @@ func (rs *ReplGroupStore) SetRing(r ring.Ring) {
 		}
 		rs.storesLock.Unlock()
 		for _, s := range shutdownStores {
-			if err := s.store.Shutdown(); err != nil {
+			if err := s.store.Shutdown(context.Background()); err != nil {
 				// TODO: debug log the err for completeness
 			}
 		}
 	}
 }
 
-func (rs *ReplGroupStore) storesFor(keyA uint64) []*replGroupStoreAndTicketChan {
+func (rs *ReplGroupStore) storesFor(ctx context.Context, keyA uint64) []*replGroupStoreAndTicketChan {
+	// TODO: Pay attention to ctx.
 	rs.ringLock.RLock()
 	r := rs.ring
 	rs.ringLock.RUnlock()
@@ -105,7 +107,7 @@ func (rs *ReplGroupStore) storesFor(keyA uint64) []*replGroupStoreAndTicketChan 
 					ss[i] = &replGroupStoreAndTicketChan{ticketChan: tc}
 					// TODO: The 10 here is arbitrary (and unrelated to the
 					// above arbitrary 10).
-					ss[i].store, err = api.NewGroupStore(as[i], 10)
+					ss[i].store, err = api.NewGroupStore(ctx, as[i], 10)
 					if err != nil {
 						ss[i].store = errorGroupStore(fmt.Sprintf("could not create store for %s: %s", as[i], err))
 						go func(addr string) {
@@ -160,21 +162,22 @@ func (rs *ReplGroupStore) ValueCap() (uint32, error) {
 	return 0xffffffff, nil
 }
 
-func (rs *ReplGroupStore) Lookup(keyA, keyB uint64, childKeyA, childKeyB uint64) (int64, uint32, error) {
+func (rs *ReplGroupStore) Lookup(ctx context.Context, keyA, keyB uint64, childKeyA, childKeyB uint64) (int64, uint32, error) {
+	// TODO: Pay attention to ctx.
 	type rettype struct {
 		timestampMicro int64
 		length         uint32
 		err            ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(keyA)
+	stores := rs.storesFor(ctx, keyA)
 	for _, s := range stores {
 		go func(s *replGroupStoreAndTicketChan) {
 			ret := &rettype{}
 			var err error
 			select {
 			case <-s.ticketChan:
-				ret.timestampMicro, ret.length, err = s.store.Lookup(keyA, keyB, childKeyA, childKeyB)
+				ret.timestampMicro, ret.length, err = s.store.Lookup(ctx, keyA, keyB, childKeyA, childKeyB)
 				s.ticketChan <- struct{}{}
 			case <-time.After(time.Second):
 				// TODO: That time.Second above is arbitrary.
@@ -213,21 +216,22 @@ func (rs *ReplGroupStore) Lookup(keyA, keyB uint64, childKeyA, childKeyB uint64)
 	return timestampMicro, length, errs
 }
 
-func (rs *ReplGroupStore) Read(keyA uint64, keyB uint64, childKeyA, childKeyB uint64, value []byte) (int64, []byte, error) {
+func (rs *ReplGroupStore) Read(ctx context.Context, keyA uint64, keyB uint64, childKeyA, childKeyB uint64, value []byte) (int64, []byte, error) {
+	// TODO: Pay attention to ctx.
 	type rettype struct {
 		timestampMicro int64
 		value          []byte
 		err            ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(keyA)
+	stores := rs.storesFor(ctx, keyA)
 	for _, s := range stores {
 		go func(s *replGroupStoreAndTicketChan) {
 			ret := &rettype{}
 			var err error
 			select {
 			case <-s.ticketChan:
-				ret.timestampMicro, ret.value, err = s.store.Read(keyA, keyB, childKeyA, childKeyB, nil)
+				ret.timestampMicro, ret.value, err = s.store.Read(ctx, keyA, keyB, childKeyA, childKeyB, nil)
 				s.ticketChan <- struct{}{}
 			case <-time.After(time.Second):
 				// TODO: That time.Second above is arbitrary.
@@ -269,20 +273,21 @@ func (rs *ReplGroupStore) Read(keyA uint64, keyB uint64, childKeyA, childKeyB ui
 	return timestampMicro, rvalue, errs
 }
 
-func (rs *ReplGroupStore) Write(keyA uint64, keyB uint64, childKeyA, childKeyB uint64, timestampMicro int64, value []byte) (int64, error) {
+func (rs *ReplGroupStore) Write(ctx context.Context, keyA uint64, keyB uint64, childKeyA, childKeyB uint64, timestampMicro int64, value []byte) (int64, error) {
+	// TODO: Pay attention to ctx.
 	type rettype struct {
 		oldTimestampMicro int64
 		err               ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(keyA)
+	stores := rs.storesFor(ctx, keyA)
 	for _, s := range stores {
 		go func(s *replGroupStoreAndTicketChan) {
 			ret := &rettype{}
 			var err error
 			select {
 			case <-s.ticketChan:
-				ret.oldTimestampMicro, err = s.store.Write(keyA, keyB, childKeyA, childKeyB, timestampMicro, value)
+				ret.oldTimestampMicro, err = s.store.Write(ctx, keyA, keyB, childKeyA, childKeyB, timestampMicro, value)
 				s.ticketChan <- struct{}{}
 			case <-time.After(time.Second):
 				// TODO: That time.Second above is arbitrary.
@@ -308,20 +313,21 @@ func (rs *ReplGroupStore) Write(keyA uint64, keyB uint64, childKeyA, childKeyB u
 	return oldTimestampMicro, errs
 }
 
-func (rs *ReplGroupStore) Delete(keyA uint64, keyB uint64, childKeyA, childKeyB uint64, timestampMicro int64) (int64, error) {
+func (rs *ReplGroupStore) Delete(ctx context.Context, keyA uint64, keyB uint64, childKeyA, childKeyB uint64, timestampMicro int64) (int64, error) {
+	// TODO: Pay attention to ctx.
 	type rettype struct {
 		oldTimestampMicro int64
 		err               ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(keyA)
+	stores := rs.storesFor(ctx, keyA)
 	for _, s := range stores {
 		go func(s *replGroupStoreAndTicketChan) {
 			ret := &rettype{}
 			var err error
 			select {
 			case <-s.ticketChan:
-				ret.oldTimestampMicro, err = s.store.Delete(keyA, keyB, childKeyA, childKeyB, timestampMicro)
+				ret.oldTimestampMicro, err = s.store.Delete(ctx, keyA, keyB, childKeyA, childKeyB, timestampMicro)
 				s.ticketChan <- struct{}{}
 			case <-time.After(time.Second):
 				// TODO: That time.Second above is arbitrary.
@@ -347,20 +353,21 @@ func (rs *ReplGroupStore) Delete(keyA uint64, keyB uint64, childKeyA, childKeyB 
 	return oldTimestampMicro, errs
 }
 
-func (rs *ReplGroupStore) LookupGroup(parentKeyA, parentKeyB uint64) ([]store.LookupGroupItem, error) {
+func (rs *ReplGroupStore) LookupGroup(ctx context.Context, parentKeyA, parentKeyB uint64) ([]store.LookupGroupItem, error) {
+	// TODO: Pay attention to ctx.
 	type rettype struct {
 		items []store.LookupGroupItem
 		err   ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(parentKeyA)
+	stores := rs.storesFor(ctx, parentKeyA)
 	for _, s := range stores {
 		go func(s *replGroupStoreAndTicketChan) {
 			ret := &rettype{}
 			var err error
 			select {
 			case <-s.ticketChan:
-				ret.items, err = s.store.LookupGroup(parentKeyA, parentKeyB)
+				ret.items, err = s.store.LookupGroup(ctx, parentKeyA, parentKeyB)
 				s.ticketChan <- struct{}{}
 			case <-time.After(time.Second):
 				// TODO: That time.Second above is arbitrary.
@@ -386,20 +393,21 @@ func (rs *ReplGroupStore) LookupGroup(parentKeyA, parentKeyB uint64) ([]store.Lo
 	return items, errs
 }
 
-func (rs *ReplGroupStore) ReadGroup(parentKeyA, parentKeyB uint64) ([]store.ReadGroupItem, error) {
+func (rs *ReplGroupStore) ReadGroup(ctx context.Context, parentKeyA, parentKeyB uint64) ([]store.ReadGroupItem, error) {
+	// TODO: Pay attention to ctx.
 	type rettype struct {
 		items []store.ReadGroupItem
 		err   ReplGroupStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(parentKeyA)
+	stores := rs.storesFor(ctx, parentKeyA)
 	for _, s := range stores {
 		go func(s *replGroupStoreAndTicketChan) {
 			ret := &rettype{}
 			var err error
 			select {
 			case <-s.ticketChan:
-				ret.items, err = s.store.ReadGroup(parentKeyA, parentKeyB)
+				ret.items, err = s.store.ReadGroup(ctx, parentKeyA, parentKeyB)
 				s.ticketChan <- struct{}{}
 			case <-time.After(time.Second):
 				// TODO: That time.Second above is arbitrary.
