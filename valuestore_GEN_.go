@@ -136,6 +136,10 @@ func (rs *ReplValueStore) storesFor(ctx context.Context, keyA uint64) ([]*replVa
 						tc <- struct{}{}
 					}
 					ss[i] = &replValueStoreAndTicketChan{ticketChan: tc}
+					// TODO: Right now, the following NewValueStore calls its
+					// Startup for you; but we'd like to undo that extra bit
+					// and make Startup a separate call; otherwise the ctx
+					// passed here is a little confusing.
 					// TODO: The 10 here is arbitrary (and unrelated to the
 					// above arbitrary 10).
 					ss[i].store, err = api.NewValueStore(ctx, as[i], 10)

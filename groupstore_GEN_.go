@@ -136,6 +136,10 @@ func (rs *ReplGroupStore) storesFor(ctx context.Context, keyA uint64) ([]*replGr
 						tc <- struct{}{}
 					}
 					ss[i] = &replGroupStoreAndTicketChan{ticketChan: tc}
+					// TODO: Right now, the following NewGroupStore calls its
+					// Startup for you; but we'd like to undo that extra bit
+					// and make Startup a separate call; otherwise the ctx
+					// passed here is a little confusing.
 					// TODO: The 10 here is arbitrary (and unrelated to the
 					// above arbitrary 10).
 					ss[i].store, err = api.NewGroupStore(ctx, as[i], 10)
