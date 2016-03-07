@@ -43,6 +43,7 @@ func (rs *ReplValueStore) SetRing(r ring.Ring) {
 	rs.ringLock.Lock()
 	rs.ring = r
 	rs.ringLock.Unlock()
+	// TODO: Test for nil ring.
 	nodes := r.Nodes()
 	currentAddrs := make(map[string]struct{}, len(nodes))
 	for _, n := range nodes {
@@ -155,35 +156,35 @@ func (rs *ReplValueStore) storesFor(ctx context.Context, keyA uint64) ([]*replVa
 	return ss, nil
 }
 
-func (rs *ReplValueStore) Startup() error {
+func (rs *ReplValueStore) Startup(ctx context.Context) error {
 	return nil
 }
 
-func (rs *ReplValueStore) Shutdown() error {
+func (rs *ReplValueStore) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (rs *ReplValueStore) EnableWrites() error {
+func (rs *ReplValueStore) EnableWrites(ctx context.Context) error {
 	return nil
 }
 
-func (rs *ReplValueStore) DisableWrites() error {
+func (rs *ReplValueStore) DisableWrites(ctx context.Context) error {
 	return errors.New("cannot disable writes with this client at this time")
 }
 
-func (rs *ReplValueStore) Flush() error {
+func (rs *ReplValueStore) Flush(ctx context.Context) error {
 	return nil
 }
 
-func (rs *ReplValueStore) AuditPass() error {
+func (rs *ReplValueStore) AuditPass(ctx context.Context) error {
 	return errors.New("audit passes not available with this client at this time")
 }
 
-func (rs *ReplValueStore) Stats(debug bool) (fmt.Stringer, error) {
+func (rs *ReplValueStore) Stats(ctx context.Context, debug bool) (fmt.Stringer, error) {
 	return noStats, nil
 }
 
-func (rs *ReplValueStore) ValueCap() (uint32, error) {
+func (rs *ReplValueStore) ValueCap(ctx context.Context) (uint32, error) {
 	return 0xffffffff, nil
 }
 

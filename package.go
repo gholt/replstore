@@ -7,6 +7,8 @@ import "errors"
 //go:generate got config.got groupconfig_GEN_.go TT=GROUP T=Group t=group
 //go:generate got store.got valuestore_GEN_.go TT=VALUE T=Value t=value
 //go:generate got store.got groupstore_GEN_.go TT=GROUP T=Group t=group
+//go:generate got store_test.got valuestore_GEN_test.go TT=VALUE T=Value t=value
+//go:generate got store_test.got groupstore_GEN_test.go TT=GROUP T=Group t=group
 //go:generate got errorstore.got valueerrorstore_GEN_.go TT=VALUE T=Value t=value
 //go:generate got errorstore.got grouperrorstore_GEN_.go TT=GROUP T=Group t=group
 
