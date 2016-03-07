@@ -39,7 +39,7 @@ func NewReplValueStore(c *ReplValueStoreConfig) *ReplValueStore {
 		logDebug:                   cfg.LogDebug,
 		logDebugOn:                 cfg.LogDebug != nil,
 		addressIndex:               cfg.AddressIndex,
-		valueCap:                   int(cfg.valueCap),
+		valueCap:                   int(cfg.ValueCap),
 		concurrentRequestsPerStore: cfg.ConcurrentRequestsPerStore,
 		streamsPerStore:            cfg.StreamsPerStore,
 		failedConnectRetryDelay:    cfg.FailedConnectRetryDelay,
