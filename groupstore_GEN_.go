@@ -13,9 +13,13 @@ import (
 )
 
 type ReplGroupStore struct {
-	logDebug     func(string, ...interface{})
-	logDebugOn   bool
-	addressIndex int
+	logDebug                   func(string, ...interface{})
+	logDebugOn                 bool
+	addressIndex               int
+	valueCap                   int
+	concurrentRequestsPerStore int
+	streamsPerStore            int
+	failedConnectRetryDelay    int
 
 	ringLock sync.RWMutex
 	ring     ring.Ring
@@ -32,9 +36,13 @@ type replGroupStoreAndTicketChan struct {
 func NewReplGroupStore(c *ReplGroupStoreConfig) *ReplGroupStore {
 	cfg := resolveReplGroupStoreConfig(c)
 	rs := &ReplGroupStore{
-		addressIndex: cfg.AddressIndex,
-		logDebug:     cfg.LogDebug,
-		logDebugOn:   cfg.LogDebug != nil,
+		logDebug:                   cfg.LogDebug,
+		logDebugOn:                 cfg.LogDebug != nil,
+		addressIndex:               cfg.AddressIndex,
+		valueCap:                   int(cfg.valueCap),
+		concurrentRequestsPerStore: cfg.ConcurrentRequestsPerStore,
+		streamsPerStore:            cfg.StreamsPerStore,
+		failedConnectRetryDelay:    cfg.FailedConnectRetryDelay,
 	}
 	if rs.logDebug == nil {
 		rs.logDebug = func(string, ...interface{}) {}
@@ -130,8 +138,7 @@ func (rs *ReplGroupStore) storesFor(ctx context.Context, keyA uint64) ([]*replGr
 				ss[i] = rs.stores[as[i]]
 				if ss[i] == nil {
 					var err error
-					// TODO: The 10 here is arbitrary.
-					tc := make(chan struct{}, 10)
+					tc := make(chan struct{}, rs.concurrentRequestsPerStore)
 					for i := cap(tc); i > 0; i-- {
 						tc <- struct{}{}
 					}
@@ -140,16 +147,13 @@ func (rs *ReplGroupStore) storesFor(ctx context.Context, keyA uint64) ([]*replGr
 					// Startup for you; but we'd like to undo that extra bit
 					// and make Startup a separate call; otherwise the ctx
 					// passed here is a little confusing.
-					// TODO: The 10 here is arbitrary (and unrelated to the
-					// above arbitrary 10).
-					ss[i].store, err = api.NewGroupStore(ctx, as[i], 10)
+					ss[i].store, err = api.NewGroupStore(ctx, as[i], rs.streamsPerStore)
 					if err != nil {
 						ss[i].store = errorGroupStore(fmt.Sprintf("could not create store for %s: %s", as[i], err))
 						// Launch goroutine to clear out the error store after
 						// some time so a retry will occur.
 						go func(addr string) {
-							// TODO: The 15 seconds is arbitrary.
-							time.Sleep(15 * time.Second)
+							time.Sleep(time.Duration(rs.failedConnectRetryDelay) * time.Second)
 							rs.storesLock.Lock()
 							s := rs.stores[addr]
 							if s != nil {
@@ -204,9 +208,7 @@ func (rs *ReplGroupStore) Stats(ctx context.Context, debug bool) (fmt.Stringer, 
 }
 
 func (rs *ReplGroupStore) ValueCap(ctx context.Context) (uint32, error) {
-	// TODO: Make this a config option? I doubt it's worth asking all available
-	// nodes what their caps are in order to report the lowest.
-	return 0xffffffff, nil
+	return uint32(rs.valueCap), nil
 }
 
 func (rs *ReplGroupStore) Lookup(ctx context.Context, keyA, keyB uint64, childKeyA, childKeyB uint64) (int64, uint32, error) {
@@ -331,6 +333,9 @@ func (rs *ReplGroupStore) Read(ctx context.Context, keyA uint64, keyB uint64, ch
 }
 
 func (rs *ReplGroupStore) Write(ctx context.Context, keyA uint64, keyB uint64, childKeyA, childKeyB uint64, timestampMicro int64, value []byte) (int64, error) {
+	if len(value) > rs.valueCap {
+		return 0, fmt.Errorf("value length of %d > %d", len(value), rs.valueCap)
+	}
 	type rettype struct {
 		oldTimestampMicro int64
 		err               ReplGroupStoreError
