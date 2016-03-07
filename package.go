@@ -21,3 +21,5 @@ func (*s) String() string {
 }
 
 var noStats = &s{}
+
+var noRingErr = errors.New("no ring")

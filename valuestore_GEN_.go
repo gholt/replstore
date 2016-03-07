@@ -43,11 +43,13 @@ func (rs *ReplValueStore) SetRing(r ring.Ring) {
 	rs.ringLock.Lock()
 	rs.ring = r
 	rs.ringLock.Unlock()
-	// TODO: Test for nil ring.
-	nodes := r.Nodes()
-	currentAddrs := make(map[string]struct{}, len(nodes))
-	for _, n := range nodes {
-		currentAddrs[n.Address(rs.addressIndex)] = struct{}{}
+	var currentAddrs map[string]struct{}
+	if r != nil {
+		nodes := r.Nodes()
+		currentAddrs = make(map[string]struct{}, len(nodes))
+		for _, n := range nodes {
+			currentAddrs[n.Address(rs.addressIndex)] = struct{}{}
+		}
 	}
 	var shutdownAddrs []string
 	rs.storesLock.RLock()
@@ -81,6 +83,9 @@ func (rs *ReplValueStore) storesFor(ctx context.Context, keyA uint64) ([]*replVa
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
+	}
+	if r == nil {
+		return nil, noRingErr
 	}
 	ns := r.ResponsibleNodes(uint32(keyA >> (64 - r.PartitionBitCount())))
 	as := make([]string, len(ns))
