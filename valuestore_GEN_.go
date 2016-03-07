@@ -72,11 +72,15 @@ func (rs *ReplValueStore) SetRing(r ring.Ring) {
 	}
 }
 
-func (rs *ReplValueStore) storesFor(ctx context.Context, keyA uint64) []*replValueStoreAndTicketChan {
-	// TODO: Pay attention to ctx.
+func (rs *ReplValueStore) storesFor(ctx context.Context, keyA uint64) ([]*replValueStoreAndTicketChan, error) {
 	rs.ringLock.RLock()
 	r := rs.ring
 	rs.ringLock.RUnlock()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 	ns := r.ResponsibleNodes(uint32(keyA >> (64 - r.PartitionBitCount())))
 	as := make([]string, len(ns))
 	for i, n := range ns {
@@ -92,8 +96,19 @@ func (rs *ReplValueStore) storesFor(ctx context.Context, keyA uint64) []*replVal
 		}
 	}
 	rs.storesLock.RUnlock()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 	if someNil {
 		rs.storesLock.Lock()
+		select {
+		case <-ctx.Done():
+			rs.storesLock.Unlock()
+			return nil, ctx.Err()
+		default:
+		}
 		for i := len(ss) - 1; i >= 0; i-- {
 			if ss[i] == nil {
 				ss[i] = rs.stores[as[i]]
@@ -110,7 +125,11 @@ func (rs *ReplValueStore) storesFor(ctx context.Context, keyA uint64) []*replVal
 					ss[i].store, err = api.NewValueStore(ctx, as[i], 10)
 					if err != nil {
 						ss[i].store = errorValueStore(fmt.Sprintf("could not create store for %s: %s", as[i], err))
+						// Launch goroutine to clear out the error store after
+						// some time so a retry will occur.
 						go func(addr string) {
+							// TODO: The 15 seconds is arbitrary.
+							time.Sleep(15 * time.Second)
 							rs.storesLock.Lock()
 							s := rs.stores[addr]
 							if s != nil {
@@ -122,12 +141,18 @@ func (rs *ReplValueStore) storesFor(ctx context.Context, keyA uint64) []*replVal
 						}(as[i])
 					}
 					rs.stores[as[i]] = ss[i]
+					select {
+					case <-ctx.Done():
+						rs.storesLock.Unlock()
+						return nil, ctx.Err()
+					default:
+					}
 				}
 			}
 		}
 		rs.storesLock.Unlock()
 	}
-	return ss
+	return ss, nil
 }
 
 func (rs *ReplValueStore) Startup() error {
@@ -170,7 +195,10 @@ func (rs *ReplValueStore) Lookup(ctx context.Context, keyA, keyB uint64) (int64,
 		err            ReplValueStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(ctx, keyA)
+	stores, err := rs.storesFor(ctx, keyA)
+	if err != nil {
+		return 0, 0, err
+	}
 	for _, s := range stores {
 		go func(s *replValueStoreAndTicketChan) {
 			ret := &rettype{}
@@ -224,7 +252,10 @@ func (rs *ReplValueStore) Read(ctx context.Context, keyA uint64, keyB uint64, va
 		err            ReplValueStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(ctx, keyA)
+	stores, err := rs.storesFor(ctx, keyA)
+	if err != nil {
+		return 0, nil, err
+	}
 	for _, s := range stores {
 		go func(s *replValueStoreAndTicketChan) {
 			ret := &rettype{}
@@ -280,7 +311,10 @@ func (rs *ReplValueStore) Write(ctx context.Context, keyA uint64, keyB uint64, t
 		err               ReplValueStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(ctx, keyA)
+	stores, err := rs.storesFor(ctx, keyA)
+	if err != nil {
+		return 0, err
+	}
 	for _, s := range stores {
 		go func(s *replValueStoreAndTicketChan) {
 			ret := &rettype{}
@@ -320,7 +354,10 @@ func (rs *ReplValueStore) Delete(ctx context.Context, keyA uint64, keyB uint64, 
 		err               ReplValueStoreError
 	}
 	ec := make(chan *rettype)
-	stores := rs.storesFor(ctx, keyA)
+	stores, err := rs.storesFor(ctx, keyA)
+	if err != nil {
+		return 0, err
+	}
 	for _, s := range stores {
 		go func(s *replValueStoreAndTicketChan) {
 			ret := &rettype{}
