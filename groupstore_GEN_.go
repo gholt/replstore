@@ -225,21 +225,20 @@ func (rs *ReplGroupStore) Lookup(ctx context.Context, keyA, keyB uint64, childKe
 	}
 	var timestampMicro int64
 	var length uint32
+	var notFound bool
 	var errs ReplGroupStoreErrorSlice
-	var notFounds int
 	for _ = range stores {
 		ret := <-ec
-		if ret.err != nil {
-			errs = append(errs, ret.err)
-			if store.IsNotFound(ret.err) {
-				notFounds++
-			}
-		} else if ret.timestampMicro > timestampMicro {
+		if ret.timestampMicro > timestampMicro {
 			timestampMicro = ret.timestampMicro
 			length = ret.length
+			notFound = store.IsNotFound(ret.err)
+		}
+		if ret.err != nil {
+			errs = append(errs, ret.err)
 		}
 	}
-	if notFounds > 0 {
+	if notFound {
 		nferrs := make(ReplGroupStoreErrorNotFound, len(errs))
 		for i, v := range errs {
 			nferrs[i] = v
