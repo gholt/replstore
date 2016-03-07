@@ -245,6 +245,10 @@ func (rs *ReplValueStore) Lookup(ctx context.Context, keyA, keyB uint64) (int64,
 		}
 		return timestampMicro, length, nferrs
 	}
+	if len(errs) < len(stores) {
+		// TODO: Debug log these errors.
+		errs = nil
+	}
 	return timestampMicro, length, errs
 }
 
@@ -278,29 +282,32 @@ func (rs *ReplValueStore) Read(ctx context.Context, keyA uint64, keyB uint64, va
 	}
 	var timestampMicro int64
 	var rvalue []byte
+	var notFound bool
 	var errs ReplValueStoreErrorSlice
-	var notFounds int
 	for _ = range stores {
 		ret := <-ec
-		if ret.err != nil {
-			errs = append(errs, ret.err)
-			if store.IsNotFound(ret.err) {
-				notFounds++
-			}
-		} else if ret.timestampMicro > timestampMicro {
+		if ret.timestampMicro > timestampMicro {
 			timestampMicro = ret.timestampMicro
 			rvalue = ret.value
+			notFound = store.IsNotFound(ret.err)
+		}
+		if ret.err != nil {
+			errs = append(errs, ret.err)
 		}
 	}
 	if value != nil && rvalue != nil {
 		rvalue = append(value, rvalue...)
 	}
-	if notFounds > 0 {
+	if notFound {
 		nferrs := make(ReplValueStoreErrorNotFound, len(errs))
 		for i, v := range errs {
 			nferrs[i] = v
 		}
 		return timestampMicro, rvalue, nferrs
+	}
+	if len(errs) < len(stores) {
+		// TODO: Debug log these errors.
+		errs = nil
 	}
 	return timestampMicro, rvalue, errs
 }
@@ -342,6 +349,10 @@ func (rs *ReplValueStore) Write(ctx context.Context, keyA uint64, keyB uint64, t
 			oldTimestampMicro = ret.oldTimestampMicro
 		}
 	}
+	if len(errs) < (len(stores)+1)/2 {
+		// TODO: Debug log these errors.
+		errs = nil
+	}
 	return oldTimestampMicro, errs
 }
 
@@ -381,6 +392,10 @@ func (rs *ReplValueStore) Delete(ctx context.Context, keyA uint64, keyB uint64, 
 		} else if ret.oldTimestampMicro > oldTimestampMicro {
 			oldTimestampMicro = ret.oldTimestampMicro
 		}
+	}
+	if len(errs) < (len(stores)+1)/2 {
+		// TODO: Debug log these errors.
+		errs = nil
 	}
 	return oldTimestampMicro, errs
 }
