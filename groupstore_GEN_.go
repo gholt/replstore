@@ -13,6 +13,8 @@ import (
 )
 
 type ReplGroupStore struct {
+	logDebug     func(string, ...interface{})
+	logDebugOn   bool
 	addressIndex int
 
 	ringLock sync.RWMutex
@@ -29,7 +31,15 @@ type replGroupStoreAndTicketChan struct {
 
 func NewReplGroupStore(c *ReplGroupStoreConfig) *ReplGroupStore {
 	cfg := resolveReplGroupStoreConfig(c)
-	return &ReplGroupStore{addressIndex: cfg.AddressIndex}
+	rs := &ReplGroupStore{
+		addressIndex: cfg.AddressIndex,
+		logDebug:     cfg.LogDebug,
+		logDebugOn:   cfg.LogDebug != nil,
+	}
+	if rs.logDebug == nil {
+		rs.logDebug = func(string, ...interface{}) {}
+	}
+	return rs
 }
 
 func (rs *ReplGroupStore) Ring() ring.Ring {
@@ -67,9 +77,9 @@ func (rs *ReplGroupStore) SetRing(r ring.Ring) {
 			rs.stores[a] = nil
 		}
 		rs.storesLock.Unlock()
-		for _, s := range shutdownStores {
+		for i, s := range shutdownStores {
 			if err := s.store.Shutdown(context.Background()); err != nil {
-				// TODO: debug log the err for completeness
+				rs.logDebug("error during shutdown of store %s: %s", shutdownAddrs[i], err)
 			}
 		}
 	}
@@ -246,7 +256,9 @@ func (rs *ReplGroupStore) Lookup(ctx context.Context, keyA, keyB uint64, childKe
 		return timestampMicro, length, nferrs
 	}
 	if len(errs) < len(stores) {
-		// TODO: Debug log these errors.
+		for _, err := range errs {
+			rs.logDebug("error during lookup: %s", err)
+		}
 		errs = nil
 	}
 	return timestampMicro, length, errs
@@ -306,7 +318,9 @@ func (rs *ReplGroupStore) Read(ctx context.Context, keyA uint64, keyB uint64, ch
 		return timestampMicro, rvalue, nferrs
 	}
 	if len(errs) < len(stores) {
-		// TODO: Debug log these errors.
+		for _, err := range errs {
+			rs.logDebug("error during read: %s", err)
+		}
 		errs = nil
 	}
 	return timestampMicro, rvalue, errs
@@ -350,7 +364,9 @@ func (rs *ReplGroupStore) Write(ctx context.Context, keyA uint64, keyB uint64, c
 		}
 	}
 	if len(errs) < (len(stores)+1)/2 {
-		// TODO: Debug log these errors.
+		for _, err := range errs {
+			rs.logDebug("error during write: %s", err)
+		}
 		errs = nil
 	}
 	return oldTimestampMicro, errs
@@ -394,7 +410,9 @@ func (rs *ReplGroupStore) Delete(ctx context.Context, keyA uint64, keyB uint64, 
 		}
 	}
 	if len(errs) < (len(stores)+1)/2 {
-		// TODO: Debug log these errors.
+		for _, err := range errs {
+			rs.logDebug("error during delete: %s", err)
+		}
 		errs = nil
 	}
 	return oldTimestampMicro, errs
@@ -439,7 +457,11 @@ func (rs *ReplGroupStore) LookupGroup(ctx context.Context, parentKeyA, parentKey
 	}
 	if len(errs) == len(stores) {
 		return items, errs
-	} // else debug log other errs
+	} else {
+		for _, err := range errs {
+			rs.logDebug("error during lookup group: %s", err)
+		}
+	}
 	return items, nil
 }
 
@@ -482,7 +504,11 @@ func (rs *ReplGroupStore) ReadGroup(ctx context.Context, parentKeyA, parentKeyB 
 	}
 	if len(errs) == len(stores) {
 		return items, errs
-	} // else debug log other errs
+	} else {
+		for _, err := range errs {
+			rs.logDebug("error during read group: %s", err)
+		}
+	}
 	return items, nil
 }
 

@@ -2,6 +2,9 @@ package replstore
 
 // ReplValueStoreConfig defines the settings when calling NewValueStore.
 type ReplValueStoreConfig struct {
+	// LogDebug sets the func to use for debug messages. Defaults to not
+	// logging debug messages.
+	LogDebug func(fmt string, args ...interface{})
 	// AddressIndex indicates which of the ring node addresses to use when
 	// connecting to a node (see github.com/gholt/ring/Node.Address).
 	AddressIndex int

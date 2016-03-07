@@ -13,6 +13,8 @@ import (
 )
 
 type ReplValueStore struct {
+	logDebug     func(string, ...interface{})
+	logDebugOn   bool
 	addressIndex int
 
 	ringLock sync.RWMutex
@@ -29,7 +31,15 @@ type replValueStoreAndTicketChan struct {
 
 func NewReplValueStore(c *ReplValueStoreConfig) *ReplValueStore {
 	cfg := resolveReplValueStoreConfig(c)
-	return &ReplValueStore{addressIndex: cfg.AddressIndex}
+	rs := &ReplValueStore{
+		addressIndex: cfg.AddressIndex,
+		logDebug:     cfg.LogDebug,
+		logDebugOn:   cfg.LogDebug != nil,
+	}
+	if rs.logDebug == nil {
+		rs.logDebug = func(string, ...interface{}) {}
+	}
+	return rs
 }
 
 func (rs *ReplValueStore) Ring() ring.Ring {
@@ -67,9 +77,9 @@ func (rs *ReplValueStore) SetRing(r ring.Ring) {
 			rs.stores[a] = nil
 		}
 		rs.storesLock.Unlock()
-		for _, s := range shutdownStores {
+		for i, s := range shutdownStores {
 			if err := s.store.Shutdown(context.Background()); err != nil {
-				// TODO: debug log the err for completeness
+				rs.logDebug("error during shutdown of store %s: %s", shutdownAddrs[i], err)
 			}
 		}
 	}
@@ -246,7 +256,9 @@ func (rs *ReplValueStore) Lookup(ctx context.Context, keyA, keyB uint64) (int64,
 		return timestampMicro, length, nferrs
 	}
 	if len(errs) < len(stores) {
-		// TODO: Debug log these errors.
+		for _, err := range errs {
+			rs.logDebug("error during lookup: %s", err)
+		}
 		errs = nil
 	}
 	return timestampMicro, length, errs
@@ -306,7 +318,9 @@ func (rs *ReplValueStore) Read(ctx context.Context, keyA uint64, keyB uint64, va
 		return timestampMicro, rvalue, nferrs
 	}
 	if len(errs) < len(stores) {
-		// TODO: Debug log these errors.
+		for _, err := range errs {
+			rs.logDebug("error during read: %s", err)
+		}
 		errs = nil
 	}
 	return timestampMicro, rvalue, errs
@@ -350,7 +364,9 @@ func (rs *ReplValueStore) Write(ctx context.Context, keyA uint64, keyB uint64, t
 		}
 	}
 	if len(errs) < (len(stores)+1)/2 {
-		// TODO: Debug log these errors.
+		for _, err := range errs {
+			rs.logDebug("error during write: %s", err)
+		}
 		errs = nil
 	}
 	return oldTimestampMicro, errs
@@ -394,7 +410,9 @@ func (rs *ReplValueStore) Delete(ctx context.Context, keyA uint64, keyB uint64, 
 		}
 	}
 	if len(errs) < (len(stores)+1)/2 {
-		// TODO: Debug log these errors.
+		for _, err := range errs {
+			rs.logDebug("error during delete: %s", err)
+		}
 		errs = nil
 	}
 	return oldTimestampMicro, errs
