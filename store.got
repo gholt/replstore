@@ -190,11 +190,12 @@ func (rs *Repl{{.T}}Store) Stats(ctx context.Context, debug bool) (fmt.Stringer,
 }
 
 func (rs *Repl{{.T}}Store) ValueCap(ctx context.Context) (uint32, error) {
+    // TODO: Make this a config option? I doubt it's worth asking all available
+    // nodes what their caps are in order to report the lowest.
     return 0xffffffff, nil
 }
 
 func (rs *Repl{{.T}}Store) Lookup(ctx context.Context, keyA, keyB uint64{{if eq .t "group"}}, childKeyA, childKeyB uint64{{end}}) (int64, uint32, error) {
-    // TODO: Pay attention to ctx.
     type rettype struct {
         timestampMicro int64
         length         uint32
@@ -213,9 +214,8 @@ func (rs *Repl{{.T}}Store) Lookup(ctx context.Context, keyA, keyB uint64{{if eq 
             case <-s.ticketChan:
                 ret.timestampMicro, ret.length, err = s.store.Lookup(ctx, keyA, keyB{{if eq .t "group"}}, childKeyA, childKeyB{{end}})
                 s.ticketChan <- struct{}{}
-            case <-time.After(time.Second):
-                // TODO: That time.Second above is arbitrary.
-                err = timeoutErr
+            case <-ctx.Done():
+                err = ctx.Err()
             }
             if err != nil {
                 ret.err = &repl{{.T}}StoreError{store: s.store, err: err}
@@ -227,7 +227,6 @@ func (rs *Repl{{.T}}Store) Lookup(ctx context.Context, keyA, keyB uint64{{if eq 
     var length uint32
     var errs Repl{{.T}}StoreErrorSlice
     var notFounds int
-    // TODO: Selection algorithms
     for _ = range stores {
         ret := <-ec
         if ret.err != nil {
@@ -251,7 +250,6 @@ func (rs *Repl{{.T}}Store) Lookup(ctx context.Context, keyA, keyB uint64{{if eq 
 }
 
 func (rs *Repl{{.T}}Store) Read(ctx context.Context, keyA uint64, keyB uint64{{if eq .t "group"}}, childKeyA, childKeyB uint64{{end}}, value []byte) (int64, []byte, error) {
-    // TODO: Pay attention to ctx.
     type rettype struct {
         timestampMicro int64
         value          []byte
@@ -270,9 +268,8 @@ func (rs *Repl{{.T}}Store) Read(ctx context.Context, keyA uint64, keyB uint64{{i
             case <-s.ticketChan:
                 ret.timestampMicro, ret.value, err = s.store.Read(ctx, keyA, keyB{{if eq .t "group"}}, childKeyA, childKeyB{{end}}, nil)
                 s.ticketChan <- struct{}{}
-            case <-time.After(time.Second):
-                // TODO: That time.Second above is arbitrary.
-                err = timeoutErr
+            case <-ctx.Done():
+                err = ctx.Err()
             }
             if err != nil {
                 ret.err = &repl{{.T}}StoreError{store: s.store, err: err}
@@ -284,7 +281,6 @@ func (rs *Repl{{.T}}Store) Read(ctx context.Context, keyA uint64, keyB uint64{{i
     var rvalue []byte
     var errs Repl{{.T}}StoreErrorSlice
     var notFounds int
-    // TODO: Selection algorithms
     for _ = range stores {
         ret := <-ec
         if ret.err != nil {
@@ -311,7 +307,6 @@ func (rs *Repl{{.T}}Store) Read(ctx context.Context, keyA uint64, keyB uint64{{i
 }
 
 func (rs *Repl{{.T}}Store) Write(ctx context.Context, keyA uint64, keyB uint64{{if eq .t "group"}}, childKeyA, childKeyB uint64{{end}}, timestampMicro int64, value []byte) (int64, error) {
-    // TODO: Pay attention to ctx.
     type rettype struct {
         oldTimestampMicro int64
         err               Repl{{.T}}StoreError
@@ -329,9 +324,8 @@ func (rs *Repl{{.T}}Store) Write(ctx context.Context, keyA uint64, keyB uint64{{
             case <-s.ticketChan:
                 ret.oldTimestampMicro, err = s.store.Write(ctx, keyA, keyB{{if eq .t "group"}}, childKeyA, childKeyB{{end}}, timestampMicro, value)
                 s.ticketChan <- struct{}{}
-            case <-time.After(time.Second):
-                // TODO: That time.Second above is arbitrary.
-                err = timeoutErr
+            case <-ctx.Done():
+                err = ctx.Err()
             }
             if err != nil {
                 ret.err = &repl{{.T}}StoreError{store: s.store, err: err}
@@ -341,7 +335,6 @@ func (rs *Repl{{.T}}Store) Write(ctx context.Context, keyA uint64, keyB uint64{{
     }
     var oldTimestampMicro int64
     var errs Repl{{.T}}StoreErrorSlice
-    // TODO: Selection algorithms
     for _ = range stores {
         ret := <-ec
         if ret.err != nil {
@@ -354,7 +347,6 @@ func (rs *Repl{{.T}}Store) Write(ctx context.Context, keyA uint64, keyB uint64{{
 }
 
 func (rs *Repl{{.T}}Store) Delete(ctx context.Context, keyA uint64, keyB uint64{{if eq .t "group"}}, childKeyA, childKeyB uint64{{end}}, timestampMicro int64) (int64, error) {
-    // TODO: Pay attention to ctx.
     type rettype struct {
         oldTimestampMicro int64
         err               Repl{{.T}}StoreError
@@ -372,9 +364,8 @@ func (rs *Repl{{.T}}Store) Delete(ctx context.Context, keyA uint64, keyB uint64{
             case <-s.ticketChan:
                 ret.oldTimestampMicro, err = s.store.Delete(ctx, keyA, keyB{{if eq .t "group"}}, childKeyA, childKeyB{{end}}, timestampMicro)
                 s.ticketChan <- struct{}{}
-            case <-time.After(time.Second):
-                // TODO: That time.Second above is arbitrary.
-                err = timeoutErr
+            case <-ctx.Done():
+                err = ctx.Err()
             }
             if err != nil {
                 ret.err = &repl{{.T}}StoreError{store: s.store, err: err}
@@ -384,7 +375,6 @@ func (rs *Repl{{.T}}Store) Delete(ctx context.Context, keyA uint64, keyB uint64{
     }
     var oldTimestampMicro int64
     var errs Repl{{.T}}StoreErrorSlice
-    // TODO: Selection algorithms
     for _ = range stores {
         ret := <-ec
         if ret.err != nil {
@@ -398,7 +388,6 @@ func (rs *Repl{{.T}}Store) Delete(ctx context.Context, keyA uint64, keyB uint64{
 
 {{if eq .t "group"}}
 func (rs *Repl{{.T}}Store) LookupGroup(ctx context.Context, parentKeyA, parentKeyB uint64) ([]store.LookupGroupItem, error) {
-    // TODO: Pay attention to ctx.
     type rettype struct {
         items []store.LookupGroupItem
         err   Repl{{.T}}StoreError
@@ -416,9 +405,8 @@ func (rs *Repl{{.T}}Store) LookupGroup(ctx context.Context, parentKeyA, parentKe
             case <-s.ticketChan:
                 ret.items, err = s.store.LookupGroup(ctx, parentKeyA, parentKeyB)
                 s.ticketChan <- struct{}{}
-            case <-time.After(time.Second):
-                // TODO: That time.Second above is arbitrary.
-                err = timeoutErr
+            case <-ctx.Done():
+                err = ctx.Err()
             }
             if err != nil {
                 ret.err = &repl{{.T}}StoreError{store: s.store, err: err}
@@ -428,7 +416,6 @@ func (rs *Repl{{.T}}Store) LookupGroup(ctx context.Context, parentKeyA, parentKe
     }
     var items []store.LookupGroupItem
     var errs Repl{{.T}}StoreErrorSlice
-    // TODO: Selection algorithms
     for _ = range stores {
         ret := <-ec
         if ret.err != nil {
@@ -441,7 +428,6 @@ func (rs *Repl{{.T}}Store) LookupGroup(ctx context.Context, parentKeyA, parentKe
 }
 
 func (rs *Repl{{.T}}Store) ReadGroup(ctx context.Context, parentKeyA, parentKeyB uint64) ([]store.ReadGroupItem, error) {
-    // TODO: Pay attention to ctx.
     type rettype struct {
         items []store.ReadGroupItem
         err   Repl{{.T}}StoreError
@@ -459,9 +445,8 @@ func (rs *Repl{{.T}}Store) ReadGroup(ctx context.Context, parentKeyA, parentKeyB
             case <-s.ticketChan:
                 ret.items, err = s.store.ReadGroup(ctx, parentKeyA, parentKeyB)
                 s.ticketChan <- struct{}{}
-            case <-time.After(time.Second):
-                // TODO: That time.Second above is arbitrary.
-                err = timeoutErr
+            case <-ctx.Done():
+                err = ctx.Err()
             }
             if err != nil {
                 ret.err = &repl{{.T}}StoreError{store: s.store, err: err}
@@ -471,7 +456,6 @@ func (rs *Repl{{.T}}Store) ReadGroup(ctx context.Context, parentKeyA, parentKeyB
     }
     var items []store.ReadGroupItem
     var errs Repl{{.T}}StoreErrorSlice
-    // TODO: Selection algorithms
     for _ = range stores {
         ret := <-ec
         if ret.err != nil {

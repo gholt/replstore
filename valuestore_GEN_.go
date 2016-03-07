@@ -190,11 +190,12 @@ func (rs *ReplValueStore) Stats(ctx context.Context, debug bool) (fmt.Stringer, 
 }
 
 func (rs *ReplValueStore) ValueCap(ctx context.Context) (uint32, error) {
+	// TODO: Make this a config option? I doubt it's worth asking all available
+	// nodes what their caps are in order to report the lowest.
 	return 0xffffffff, nil
 }
 
 func (rs *ReplValueStore) Lookup(ctx context.Context, keyA, keyB uint64) (int64, uint32, error) {
-	// TODO: Pay attention to ctx.
 	type rettype struct {
 		timestampMicro int64
 		length         uint32
@@ -213,9 +214,8 @@ func (rs *ReplValueStore) Lookup(ctx context.Context, keyA, keyB uint64) (int64,
 			case <-s.ticketChan:
 				ret.timestampMicro, ret.length, err = s.store.Lookup(ctx, keyA, keyB)
 				s.ticketChan <- struct{}{}
-			case <-time.After(time.Second):
-				// TODO: That time.Second above is arbitrary.
-				err = timeoutErr
+			case <-ctx.Done():
+				err = ctx.Err()
 			}
 			if err != nil {
 				ret.err = &replValueStoreError{store: s.store, err: err}
@@ -227,7 +227,6 @@ func (rs *ReplValueStore) Lookup(ctx context.Context, keyA, keyB uint64) (int64,
 	var length uint32
 	var errs ReplValueStoreErrorSlice
 	var notFounds int
-	// TODO: Selection algorithms
 	for _ = range stores {
 		ret := <-ec
 		if ret.err != nil {
@@ -251,7 +250,6 @@ func (rs *ReplValueStore) Lookup(ctx context.Context, keyA, keyB uint64) (int64,
 }
 
 func (rs *ReplValueStore) Read(ctx context.Context, keyA uint64, keyB uint64, value []byte) (int64, []byte, error) {
-	// TODO: Pay attention to ctx.
 	type rettype struct {
 		timestampMicro int64
 		value          []byte
@@ -270,9 +268,8 @@ func (rs *ReplValueStore) Read(ctx context.Context, keyA uint64, keyB uint64, va
 			case <-s.ticketChan:
 				ret.timestampMicro, ret.value, err = s.store.Read(ctx, keyA, keyB, nil)
 				s.ticketChan <- struct{}{}
-			case <-time.After(time.Second):
-				// TODO: That time.Second above is arbitrary.
-				err = timeoutErr
+			case <-ctx.Done():
+				err = ctx.Err()
 			}
 			if err != nil {
 				ret.err = &replValueStoreError{store: s.store, err: err}
@@ -284,7 +281,6 @@ func (rs *ReplValueStore) Read(ctx context.Context, keyA uint64, keyB uint64, va
 	var rvalue []byte
 	var errs ReplValueStoreErrorSlice
 	var notFounds int
-	// TODO: Selection algorithms
 	for _ = range stores {
 		ret := <-ec
 		if ret.err != nil {
@@ -311,7 +307,6 @@ func (rs *ReplValueStore) Read(ctx context.Context, keyA uint64, keyB uint64, va
 }
 
 func (rs *ReplValueStore) Write(ctx context.Context, keyA uint64, keyB uint64, timestampMicro int64, value []byte) (int64, error) {
-	// TODO: Pay attention to ctx.
 	type rettype struct {
 		oldTimestampMicro int64
 		err               ReplValueStoreError
@@ -329,9 +324,8 @@ func (rs *ReplValueStore) Write(ctx context.Context, keyA uint64, keyB uint64, t
 			case <-s.ticketChan:
 				ret.oldTimestampMicro, err = s.store.Write(ctx, keyA, keyB, timestampMicro, value)
 				s.ticketChan <- struct{}{}
-			case <-time.After(time.Second):
-				// TODO: That time.Second above is arbitrary.
-				err = timeoutErr
+			case <-ctx.Done():
+				err = ctx.Err()
 			}
 			if err != nil {
 				ret.err = &replValueStoreError{store: s.store, err: err}
@@ -341,7 +335,6 @@ func (rs *ReplValueStore) Write(ctx context.Context, keyA uint64, keyB uint64, t
 	}
 	var oldTimestampMicro int64
 	var errs ReplValueStoreErrorSlice
-	// TODO: Selection algorithms
 	for _ = range stores {
 		ret := <-ec
 		if ret.err != nil {
@@ -354,7 +347,6 @@ func (rs *ReplValueStore) Write(ctx context.Context, keyA uint64, keyB uint64, t
 }
 
 func (rs *ReplValueStore) Delete(ctx context.Context, keyA uint64, keyB uint64, timestampMicro int64) (int64, error) {
-	// TODO: Pay attention to ctx.
 	type rettype struct {
 		oldTimestampMicro int64
 		err               ReplValueStoreError
@@ -372,9 +364,8 @@ func (rs *ReplValueStore) Delete(ctx context.Context, keyA uint64, keyB uint64, 
 			case <-s.ticketChan:
 				ret.oldTimestampMicro, err = s.store.Delete(ctx, keyA, keyB, timestampMicro)
 				s.ticketChan <- struct{}{}
-			case <-time.After(time.Second):
-				// TODO: That time.Second above is arbitrary.
-				err = timeoutErr
+			case <-ctx.Done():
+				err = ctx.Err()
 			}
 			if err != nil {
 				ret.err = &replValueStoreError{store: s.store, err: err}
@@ -384,7 +375,6 @@ func (rs *ReplValueStore) Delete(ctx context.Context, keyA uint64, keyB uint64, 
 	}
 	var oldTimestampMicro int64
 	var errs ReplValueStoreErrorSlice
-	// TODO: Selection algorithms
 	for _ = range stores {
 		ret := <-ec
 		if ret.err != nil {

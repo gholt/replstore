@@ -12,8 +12,6 @@ import "errors"
 //go:generate got errorstore.got valueerrorstore_GEN_.go TT=VALUE T=Value t=value
 //go:generate got errorstore.got grouperrorstore_GEN_.go TT=GROUP T=Group t=group
 
-var timeoutErr = errors.New("timeout")
-
 type s struct{}
 
 func (*s) String() string {
