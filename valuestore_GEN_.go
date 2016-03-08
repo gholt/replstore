@@ -87,7 +87,7 @@ func (rs *ReplValueStore) SetRing(r ring.Ring) {
 		rs.storesLock.Unlock()
 		for i, s := range shutdownStores {
 			if err := s.store.Shutdown(context.Background()); err != nil {
-				rs.logDebug("error during shutdown of store %s: %s", shutdownAddrs[i], err)
+				rs.logDebug("replValueStore: error during shutdown of store %s: %s", shutdownAddrs[i], err)
 			}
 		}
 	}
@@ -263,7 +263,7 @@ func (rs *ReplValueStore) Lookup(ctx context.Context, keyA, keyB uint64) (int64,
 	}
 	if len(errs) < len(stores) {
 		for _, err := range errs {
-			rs.logDebug("error during lookup: %s", err)
+			rs.logDebug("replValueStore: error during lookup: %s", err)
 		}
 		errs = nil
 	}
@@ -325,7 +325,7 @@ func (rs *ReplValueStore) Read(ctx context.Context, keyA uint64, keyB uint64, va
 	}
 	if len(errs) < len(stores) {
 		for _, err := range errs {
-			rs.logDebug("error during read: %s", err)
+			rs.logDebug("replValueStore: error during read: %s", err)
 		}
 		errs = nil
 	}
@@ -374,7 +374,7 @@ func (rs *ReplValueStore) Write(ctx context.Context, keyA uint64, keyB uint64, t
 	}
 	if len(errs) < (len(stores)+1)/2 {
 		for _, err := range errs {
-			rs.logDebug("error during write: %s", err)
+			rs.logDebug("replValueStore: error during write: %s", err)
 		}
 		errs = nil
 	}
@@ -420,7 +420,7 @@ func (rs *ReplValueStore) Delete(ctx context.Context, keyA uint64, keyB uint64, 
 	}
 	if len(errs) < (len(stores)+1)/2 {
 		for _, err := range errs {
-			rs.logDebug("error during delete: %s", err)
+			rs.logDebug("replValueStore: error during delete: %s", err)
 		}
 		errs = nil
 	}

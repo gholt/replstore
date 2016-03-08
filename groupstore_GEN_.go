@@ -87,7 +87,7 @@ func (rs *ReplGroupStore) SetRing(r ring.Ring) {
 		rs.storesLock.Unlock()
 		for i, s := range shutdownStores {
 			if err := s.store.Shutdown(context.Background()); err != nil {
-				rs.logDebug("error during shutdown of store %s: %s", shutdownAddrs[i], err)
+				rs.logDebug("replGroupStore: error during shutdown of store %s: %s", shutdownAddrs[i], err)
 			}
 		}
 	}
@@ -263,7 +263,7 @@ func (rs *ReplGroupStore) Lookup(ctx context.Context, keyA, keyB uint64, childKe
 	}
 	if len(errs) < len(stores) {
 		for _, err := range errs {
-			rs.logDebug("error during lookup: %s", err)
+			rs.logDebug("replGroupStore: error during lookup: %s", err)
 		}
 		errs = nil
 	}
@@ -325,7 +325,7 @@ func (rs *ReplGroupStore) Read(ctx context.Context, keyA uint64, keyB uint64, ch
 	}
 	if len(errs) < len(stores) {
 		for _, err := range errs {
-			rs.logDebug("error during read: %s", err)
+			rs.logDebug("replGroupStore: error during read: %s", err)
 		}
 		errs = nil
 	}
@@ -374,7 +374,7 @@ func (rs *ReplGroupStore) Write(ctx context.Context, keyA uint64, keyB uint64, c
 	}
 	if len(errs) < (len(stores)+1)/2 {
 		for _, err := range errs {
-			rs.logDebug("error during write: %s", err)
+			rs.logDebug("replGroupStore: error during write: %s", err)
 		}
 		errs = nil
 	}
@@ -420,7 +420,7 @@ func (rs *ReplGroupStore) Delete(ctx context.Context, keyA uint64, keyB uint64, 
 	}
 	if len(errs) < (len(stores)+1)/2 {
 		for _, err := range errs {
-			rs.logDebug("error during delete: %s", err)
+			rs.logDebug("replGroupStore: error during delete: %s", err)
 		}
 		errs = nil
 	}
@@ -468,7 +468,7 @@ func (rs *ReplGroupStore) LookupGroup(ctx context.Context, parentKeyA, parentKey
 		return items, errs
 	} else {
 		for _, err := range errs {
-			rs.logDebug("error during lookup group: %s", err)
+			rs.logDebug("replGroupStore: error during lookup group: %s", err)
 		}
 	}
 	return items, nil
@@ -515,7 +515,7 @@ func (rs *ReplGroupStore) ReadGroup(ctx context.Context, parentKeyA, parentKeyB 
 		return items, errs
 	} else {
 		for _, err := range errs {
-			rs.logDebug("error during read group: %s", err)
+			rs.logDebug("replGroupStore: error during read group: %s", err)
 		}
 	}
 	return items, nil
